@@ -12,7 +12,7 @@
 static const uint32_t SAMPLE_PERIOD_MS = 10; // 1000 ms / 100 Hz
 
 /* Serial baud rate - must match the Python receiver */
-static const uint32_t SERIAL_BAUD = 921600;
+static const uint32_t SERIAL_BAUD = 115200;
 
 // Check I2C device address and correct line below (by default address is 0x29 or 0x28)
 //                                   id, address

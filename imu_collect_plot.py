@@ -8,13 +8,14 @@ The ESP32 firmware (IMU_BNO055.ino) streams one CSV line per sample at 100 Hz:
 This script
   * reads the serial port in a background thread,
   * appends every sample to data/imu_data_YYYYMMDD_HHMMSS.csv immediately,
-  * renders all channels as live rolling-window subplots (~10 s window).
+  * renders all channels as live rolling-window subplots (~10 s window),
+    redrawn with numpy + TkAgg blitting for high-FPS updates (default 30).
 
 Usage:
-    python imu_collect_plot.py --port COM5 [--baud 921600]
+    python imu_collect_plot.py --port COM5 [--baud 921600] [--fps 30]
 
 Dependencies:
-    pip install pyserial matplotlib
+    pip install pyserial matplotlib numpy
 """
 
 from __future__ import annotations
@@ -31,6 +32,11 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # only for type annotations, not imported at runtime
     from matplotlib.lines import Line2D
+
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover
+    sys.exit("Missing dependency 'numpy'. Install it with:  pip install numpy")
 
 try:
     import serial
@@ -89,10 +95,12 @@ GROUPS = [
 ]
 
 WINDOW_S = 10.0        # rolling plot window (seconds)
-PLOT_FPS = 10          # plot refresh rate - kept modest to limit CPU usage
-MAX_PLOT_POINTS = 300  # max points per line on screen; display-only decimation,
+PLOT_FPS = 30          # default plot refresh rate (override with --fps, up to ~60)
+MAX_PLOT_POINTS = 400  # max points per line on screen; display-only decimation,
                        # the CSV still stores every sample at full 100 Hz
-AUTOSCALE_EVERY = 4    # re-fit Y axes every N frames (relim/autoscale is costly)
+AUTOSCALE_EVERY = 6    # re-check Y limits every N frames (numpy min/max is cheap)
+FORCE_FULL_EVERY = 30  # unconditional full redraw every N frames (refreshes title)
+FLUSH_EVERY = 10       # CSV flush cadence in rows (~0.1 s at 100 Hz)
 
 
 def make_csv_path() -> Path:
@@ -117,8 +125,9 @@ def find_port() -> str | None:
 class ImuCollector:
     """Reads the ESP32 stream, stores every sample to CSV, feeds the live plot."""
 
-    def __init__(self, port: str, baud: int) -> None:
-        self.ser = serial.Serial(port=port, baudrate=baud, timeout=1)
+    def __init__(self, port: str, baud: int, fps: int = PLOT_FPS) -> None:
+        # Short read timeout so the reader thread notices stop() quickly.
+        self.ser = serial.Serial(port=port, baudrate=baud, timeout=0.5)
         self.csv_path = make_csv_path()
         self._csv_file = open(self.csv_path, "w", newline="")
         self._csv_writer = csv.writer(self._csv_file)
@@ -131,9 +140,15 @@ class ImuCollector:
         self.total_samples = 0
         self.start_time = time.monotonic()
         self._stop = threading.Event()
+        self.fps = fps
         self.reader_thread: threading.Thread | None = None
         self.timer = None
         self._frame_count = 0
+        # Blitting state: cached static canvas (axes/grid/labels) that we
+        # restore each frame and repaint only the data lines on top of it.
+        self.background = None
+        self._resized = False
+        self._rows_since_flush = 0
 
     # -- serial reader (background thread) ------------------------------------
     def reader_loop(self) -> None:
@@ -154,67 +169,132 @@ class ImuCollector:
             with self.lock:
                 self.samples.append(values)
                 self.total_samples += 1
-            # Store immediately - one row per sample, flushed so a crash loses nothing.
+            # Store immediately - one row per sample; flush every FLUSH_EVERY
+            # rows so a crash loses at most ~0.1 s while I/O stays cheap.
             self._csv_writer.writerow(parts)
-            self._csv_file.flush()
+            self._rows_since_flush += 1
+            if self._rows_since_flush >= FLUSH_EVERY:
+                self._rows_since_flush = 0
+                self._csv_file.flush()
 
     # -- real-time plot ---------------------------------------------------------
     def build_figure(self) -> None:
         self.fig, axes = plt.subplots(
             len(GROUPS), 1, figsize=(12, 14), sharex=True)
         self.axes = list(axes)
-        self.lines: list[tuple[int, "Line2D"]] = []
+        # Per-axis (column index, Line2D) pairs for fast blitted redraws.
+        self.axis_lines: list[tuple["plt.Axes", list[tuple[int, "Line2D"]]]] = []
         for ax, (title, channels) in zip(self.axes, GROUPS):
             ax.set_title(title, fontsize=9, loc="left")
             ax.grid(True, alpha=0.3)
+            # Fixed axes: the data scrolls inside a static window, so the
+            # grid, ticks and labels can be cached once and blitted per frame.
+            ax.autoscale(enable=False)
+            ax.set_xlim(0.0, WINDOW_S)
+            lines = []
             for ch in channels:
                 (line,) = ax.plot([], [], label=ch, linewidth=1.0)
-                self.lines.append((IDX[ch], line))
+                lines.append((IDX[ch], line))
+            self.axis_lines.append((ax, lines))
             if len(channels) > 1:
                 ax.legend(fontsize=7, ncol=len(channels), loc="upper right")
         self.axes[-1].set_xlabel("Time (s)")
         plt.tight_layout(rect=(0, 0, 1, 0.985))
 
+        # Status line; refreshed on full redraws (see _full_redraw).
+        self.suptitle = self.fig.suptitle("", fontsize=10)
+        # A resize invalidates the cached background -> full redraw next frame.
+        self.fig.canvas.mpl_connect(
+            "resize_event", lambda e: setattr(self, "_resized", True))
+
+        # Prime the cached background (empty plot) before starting updates.
+        self._full_redraw()
+
         # Update the plot from a canvas timer that runs inside the GUI event
         # loop - keeps the window responsive and works with any backend.
-        self.timer = self.fig.canvas.new_timer(interval=int(1000.0 / PLOT_FPS))
+        self.timer = self.fig.canvas.new_timer(interval=int(1000.0 / self.fps))
         self.timer.add_callback(self._update_frame)
         self.timer.start()
 
     def _update_frame(self) -> None:
         with self.lock:
             snap = list(self.samples)
-            total = self.total_samples
-        if snap:
-            # Decimate for display only (the CSV keeps every sample): limits
-            # each line to ~MAX_PLOT_POINTS points so redraws stay cheap.
-            step = max(1, len(snap) // MAX_PLOT_POINTS)
-            view = snap[::step]
-            x_s = [s[0] / 1000.0 for s in view]
-            x_max = x_s[-1]
+        if not snap:
+            return
+        # Vectorized rolling-window view (display-only decimation; the CSV
+        # keeps every sample at full 100 Hz). Data is re-based so it always
+        # spans [0, WINDOW_S] inside the fixed axes.
+        arr = np.asarray(snap, dtype=np.float64)
+        step = max(1, len(arr) // MAX_PLOT_POINTS)
+        view = arr[::step]
+        t0_ms = max(0.0, float(view[-1, IDX["t_ms"]]) - WINDOW_S * 1000.0)
+        x_s = (view[:, IDX["t_ms"]] - t0_ms) / 1000.0
 
-            # 1. Update all line data.
-            for idx, line in self.lines:
-                line.set_data(x_s, [s[idx] for s in view])
-
-            # 2. Auto-fit each subplot's Y axis (min/max). Throttled to every
-            #    AUTOSCALE_EVERY frames: relim()/autoscale_view() is the most
-            #    expensive part of a frame and 10 Hz refits look continuous.
-            if self._frame_count % AUTOSCALE_EVERY == 0:
-                for ax in self.axes:
-                    ax.relim()
-                    ax.autoscale_view(scalex=False, scaley=True)
-
-            # 3. Rolling X range (sharex=True -> setting the last axis syncs all).
-            self.axes[-1].set_xlim(
-                max(0.0, x_max - WINDOW_S), max(WINDOW_S, x_max))
         self._frame_count += 1
+        full_redraw = (
+            self.background is None
+            or self._resized
+            or self._frame_count % FORCE_FULL_EVERY == 0
+        )
+        if not full_redraw and self._frame_count % AUTOSCALE_EVERY == 0:
+            # Cheap numpy min/max; only touch the axes (and force a redraw)
+            # when the data range actually moved beyond a small tolerance.
+            if self._y_limits_need_update(view):
+                full_redraw = True
+        if full_redraw:
+            self._fit_y_limits(view)
+            self._full_redraw()
+
+        # Blit: restore the cached static background, repaint only the lines.
+        try:
+            self.fig.canvas.restore_region(self.background)
+            for ax, lines in self.axis_lines:
+                for idx, line in lines:
+                    line.set_data(x_s, view[:, idx])
+                    ax.draw_artist(line)
+            self.fig.canvas.blit(self.fig.bbox)
+        except Exception:  # backend hiccup -> fall back to a plain full draw
+            self.background = None
+            self.fig.canvas.draw_idle()
+
+    def _fit_y_limits(self, view: np.ndarray) -> None:
+        """Set each subplot's Y range from the current window (+5% padding)."""
+        for ax, (title, channels) in zip(self.axes, GROUPS):
+            cols = view[:, [IDX[c] for c in channels]]
+            lo, hi = float(cols.min()), float(cols.max())
+            if hi - lo < 1e-9:
+                lo, hi = lo - 0.5, hi + 0.5
+            pad = (hi - lo) * 0.05
+            ax.set_ylim(lo - pad, hi + pad)
+
+    def _y_limits_need_update(self, view: np.ndarray) -> bool:
+        """True if any channel left the current Y range by more than ~10%."""
+        for ax, (title, channels) in zip(self.axes, GROUPS):
+            cols = view[:, [IDX[c] for c in channels]]
+            lo, hi = float(cols.min()), float(cols.max())
+            cur_lo, cur_hi = ax.get_ylim()
+            span = max(abs(cur_hi - cur_lo), 1e-9)
+            if lo < cur_lo - 0.1 * span or hi > cur_hi + 0.1 * span:
+                return True
+        return False
+
+    def _full_redraw(self) -> None:
+        """Full canvas draw and re-capture of the static background."""
+        self._resized = False
         elapsed = time.monotonic() - self.start_time
-        rate = total / elapsed if elapsed > 0 else 0.0
-        self.fig.suptitle(
-            f"IMU BNO055 - {total} samples | {rate:.1f} Hz | "
-            f"CSV: {self.csv_path.name}", fontsize=10)
-        self.fig.canvas.draw_idle()
+        rate = self.total_samples / elapsed if elapsed > 0 else 0.0
+        self.suptitle.set_text(
+            f"IMU BNO055 - {self.total_samples} samples | {rate:.1f} Hz | "
+            f"CSV: {self.csv_path.name}")
+        # Hide the dynamic lines while capturing so they are not baked in.
+        for _, lines in self.axis_lines:
+            for _, line in lines:
+                line.set_visible(False)
+        self.fig.canvas.draw()
+        self.background = self.fig.canvas.copy_from_bbox(self.fig.bbox)
+        for _, lines in self.axis_lines:
+            for _, line in lines:
+                line.set_visible(True)
 
     def stop(self) -> None:
         self._stop.set()
@@ -243,8 +323,11 @@ def main() -> None:
         description="Collect BNO055 IMU data from an ESP32 and plot it live.")
     ap.add_argument("--port", default=None,
                     help="Serial port (e.g. COM5). Default: auto-detect.")
-    ap.add_argument("--baud", type=int, default=921600,
-                    help="Baud rate; must match the firmware (default 921600)")
+    ap.add_argument("--baud", type=int, default=115200,
+                    help="Baud rate; must match the firmware (default 115200)")
+    ap.add_argument("--fps", type=int, default=PLOT_FPS,
+                    help=f"Plot refresh rate in FPS (default {PLOT_FPS}, "
+                         "try up to ~60 on a fast machine)")
     args = ap.parse_args()
 
     port = args.port or find_port()
@@ -254,7 +337,7 @@ def main() -> None:
         print(f"Auto-detected serial port {port} (override with --port).")
 
     try:
-        collector = ImuCollector(port, args.baud)
+        collector = ImuCollector(port, args.baud, args.fps)
     except OSError as exc:  # includes serial.SerialException
         sys.exit(f"Could not open {port}: {exc}")
 
