@@ -12,7 +12,7 @@ This script
     redrawn with numpy + TkAgg blitting for high-FPS updates (default 30).
 
 Usage:
-    python imu_collect_plot.py --port COM5 [--baud 921600] [--fps 30]
+    python imu_collect_plot.py --port COM5 [--baud 115200] [--fps 30]
 
 Dependencies:
     pip install pyserial matplotlib numpy
