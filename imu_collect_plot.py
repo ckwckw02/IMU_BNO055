@@ -12,7 +12,9 @@ This script
     redrawn with numpy + TkAgg blitting for high-FPS updates (default 30).
 
 Usage:
-    python imu_collect_plot.py --port COM5 [--baud 115200] [--fps 30]
+    python imu_collect_plot.py --port COM5 [--baud 921600] [--fps 30]
+    python imu_collect_plot.py --tag stand            # label the CSV file
+    python imu_collect_plot.py --headless             # record, no plot window
 
 Dependencies:
     pip install pyserial matplotlib numpy
@@ -103,11 +105,15 @@ FORCE_FULL_EVERY = 30  # unconditional full redraw every N frames (refreshes tit
 FLUSH_EVERY = 10       # CSV flush cadence in rows (~0.1 s at 100 Hz)
 
 
-def make_csv_path() -> Path:
-    """New timestamped CSV file per run, stored in ./data next to this script."""
+def make_csv_path(tag: str | None = None) -> Path:
+    """New timestamped CSV file per run, stored in ./data next to this script.
+
+    An optional ``tag`` (e.g. "stand", "walk_slow") is appended so several
+    recordings from one session can be kept apart without mixing them up."""
     out_dir = Path(__file__).resolve().parent / "data"
     out_dir.mkdir(exist_ok=True)
-    return out_dir / f"imu_data_{datetime.now():%Y%m%d_%H%M%S}.csv"
+    suffix = f"_{tag}" if tag else ""
+    return out_dir / f"imu_data_{datetime.now():%Y%m%d_%H%M%S}{suffix}.csv"
 
 
 def find_port() -> str | None:
@@ -125,10 +131,11 @@ def find_port() -> str | None:
 class ImuCollector:
     """Reads the ESP32 stream, stores every sample to CSV, feeds the live plot."""
 
-    def __init__(self, port: str, baud: int, fps: int = PLOT_FPS) -> None:
+    def __init__(self, port: str, baud: int, fps: int = PLOT_FPS,
+                 tag: str | None = None) -> None:
         # Short read timeout so the reader thread notices stop() quickly.
         self.ser = serial.Serial(port=port, baudrate=baud, timeout=0.5)
-        self.csv_path = make_csv_path()
+        self.csv_path = make_csv_path(tag)
         self._csv_file = open(self.csv_path, "w", newline="")
         self._csv_writer = csv.writer(self._csv_file)
         self._csv_writer.writerow(FIELDS)
@@ -318,16 +325,40 @@ class ImuCollector:
               f"({rate:.1f} Hz) to:\n  {self.csv_path}")
 
 
+def _run_headless(collector: "ImuCollector") -> None:
+    """Block without a GUI while the reader thread writes samples to CSV.
+
+    Prints a short status line every couple of seconds and returns on Ctrl+C,
+    or as soon as the serial link drops (the reader thread exits)."""
+    print("Headless recording - no plot window. Stop with Ctrl+C.")
+    last_n = 0
+    last_t = time.monotonic()
+    while collector.reader_thread.is_alive():
+        time.sleep(2.0)
+        now = time.monotonic()
+        n = collector.total_samples
+        rate = (n - last_n) / max(now - last_t, 1e-9)
+        print(f"  {n} samples | ~{rate:.0f} Hz -> {collector.csv_path.name}")
+        last_n, last_t = n, now
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="Collect BNO055 IMU data from an ESP32 and plot it live.")
     ap.add_argument("--port", default=None,
                     help="Serial port (e.g. COM5). Default: auto-detect.")
-    ap.add_argument("--baud", type=int, default=115200,
-                    help="Baud rate; must match the firmware (default 115200)")
+    ap.add_argument("--baud", type=int, default=921600,
+                    help="Baud rate; must match the firmware (default 921600)")
     ap.add_argument("--fps", type=int, default=PLOT_FPS,
                     help=f"Plot refresh rate in FPS (default {PLOT_FPS}, "
                          "try up to ~60 on a fast machine)")
+    ap.add_argument("--tag", default=None,
+                    help="Label appended to the CSV filename (e.g. 'stand', "
+                         "'walk_slow') so several recordings from one session "
+                         "stay separate.")
+    ap.add_argument("--headless", action="store_true",
+                    help="Record to CSV without opening a plot window; prints "
+                         "a status line every few seconds (stop with Ctrl+C).")
     args = ap.parse_args()
 
     port = args.port or find_port()
@@ -337,20 +368,23 @@ def main() -> None:
         print(f"Auto-detected serial port {port} (override with --port).")
 
     try:
-        collector = ImuCollector(port, args.baud, args.fps)
+        collector = ImuCollector(port, args.baud, args.fps, tag=args.tag)
     except OSError as exc:  # includes serial.SerialException
         sys.exit(f"Could not open {port}: {exc}")
 
     print(f"Streaming from {port} @ {args.baud} baud -> {collector.csv_path}")
-    print("Stop with Ctrl+C (or close the plot window).")
 
     collector.reader_thread = threading.Thread(
         target=collector.reader_loop, name="serial-reader", daemon=True)
     collector.reader_thread.start()
 
     try:
-        collector.build_figure()
-        plt.show()  # blocks until the window is closed or Ctrl+C is pressed
+        if args.headless:
+            _run_headless(collector)
+        else:
+            print("Stop with Ctrl+C (or close the plot window).")
+            collector.build_figure()
+            plt.show()  # blocks until the window is closed or Ctrl+C is pressed
     except KeyboardInterrupt:
         pass
     finally:
