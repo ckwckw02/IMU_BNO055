@@ -149,7 +149,7 @@ void setup(void)
 
 
   /* Initialise the sensor */
-  if (!bno.begin())
+  if (!bno.begin(OPERATION_MODE_IMUPLUS))
   {
     /* There was a problem detecting the BNO055 ... check your connections */
     Serial.print(F("Ooops, no BNO055 detected ... Check your wiring or I2C ADDR!"));
