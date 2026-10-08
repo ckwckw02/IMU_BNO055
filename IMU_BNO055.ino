@@ -6,6 +6,7 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
 #include <utility/imumaths.h>
+#include <Preferences.h>
 
 
 /* System sample rate: 100 Hz, driven by two dedicated FreeRTOS tasks:
@@ -157,6 +158,38 @@ void setup(void)
   }
 
   delay(1000); // let the sensor settle before streaming starts
+
+  /* Load calibration offsets written by Calibrate\Calibrate.ino (NVS namespace
+     "bno055", keys "bnoID" + "calibData"). Read-only session; if no data or a
+     different BNO055 unit is stored, warn and stream with factory defaults. */
+  {
+    Preferences prefs;
+    sensor_t sensor;
+    bno.getSensor(&sensor);
+
+    prefs.begin("bno055", true); // read-only: this sketch never writes NVS
+    const long storedBnoID = prefs.getLong("bnoID", 0);
+
+    if (storedBnoID == (long)sensor.sensor_id)
+    {
+      adafruit_bno055_offsets_t calibData;
+      const size_t n = prefs.getBytes("calibData", &calibData, sizeof(calibData));
+      if (n == sizeof(calibData))
+      {
+        bno.setSensorOffsets(calibData);
+        Serial.println(F("BNO055 calibration loaded from Preferences."));
+      }
+      else
+      {
+        Serial.println(F("Warning: 'calibData' missing in Preferences - run Calibrate.ino first; streaming with factory defaults."));
+      }
+    }
+    else
+    {
+      Serial.println(F("Warning: no BNO055 calibration for this sensor in Preferences - run Calibrate.ino first; streaming with factory defaults."));
+    }
+    prefs.end();
+  }
 
   // CSV header, printed exactly once. The Python receiver skips non-numeric lines.
   Serial.println(F("t_ms,euler_x,euler_y,euler_z,gyro_x,gyro_y,gyro_z,"
