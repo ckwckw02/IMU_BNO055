@@ -143,7 +143,7 @@ void setup(void) {
   Wire.begin(SDA_PIN, SCL_PIN);
 
   /* Initialise the sensor */
-  if (!bno.begin(OPERATION_MODE_NDOF_FMC_OFF)) {
+  if (!bno.begin(OPERATION_MODE_IMUPLUS)) {
     Serial.print("Ooops, no BNO055 detected ... Check your wiring or I2C ADDR!");
     while (1)
       ;
