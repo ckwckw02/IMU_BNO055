@@ -1,0 +1,353 @@
+BNO055 calibration loaded.
+WIFI,CONNECTING,MotorControl
+...........
+WIFI,CONNECTED,192.168.4.3
+CAL,BEGIN,stand still 5 seconds; then walk 8 seconds.
+CAL,STILL,2/5000 ms
+CAL,STILL,1002/5000 ms
+CAL,STILL,2002/5000 ms
+CAL,STILL,3002/5000 ms
+CAL,STILL,4002/5000 ms
+CAL,STILL,5002/5000 ms
+CAL,STILL_DONE,now walk naturally.
+CAL,WALK,1002/8000 ms,range=0.07..0.19
+CAL,WALK,2002/8000 ms,range=0.06..337.99
+CAL,WALK,3002/8000 ms,range=0.06..382.65
+CAL,WALK,4002/8000 ms,range=0.06..382.65
+CAL,WALK,5002/8000 ms,range=0.06..382.65
+CAL,WALK,6011/8000 ms,range=0.06..382.65
+CAL,WALK,7020/8000 ms,range=0.06..382.65
+CAL,DONE,pitch_offset=170.01,on=76.57,off=172.22
+FSM,FOOT_ON_GROUND,STARTED
+FSM,FOOT_ON_GROUND,theta=-86.00,omega=2270.75,metric=120.06
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-10.39,omega=176.07,metric=13.04
+FSM,FOOT_ON_GROUND,theta=-7.68,omega=-25.84,metric=8.07
+FSM,FOOT_ON_GROUND,theta=-9.58,omega=0.85,metric=9.60
+FSM,FOOT_ON_GROUND,theta=-4.15,omega=106.54,metric=5.75
+FSM,FOOT_ON_GROUND,theta=-65.13,omega=-7089.95,metric=171.48
+FSM,FOOT_OFF_GROUND,theta=-121.60,omega=-5647.38,metric=206.31
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-311.63,omega=-677.11,metric=321.79
+FSM,FOOT_OFF_GROUND,theta=-332.04,omega=-31.16,metric=332.50
+FSM,FOOT_OFF_GROUND,theta=-333.15,omega=-6.30,metric=333.25
+FSM,FOOT_OFF_GROUND,theta=-332.03,omega=7.99,metric=332.15
+FSM,FOOT_OFF_GROUND,theta=-332.18,omega=-20.66,metric=332.49
+FSM,FOOT_OFF_GROUND,theta=-336.25,omega=-60.47,metric=337.16
+FSM,FOOT_OFF_GROUND,theta=-343.19,omega=-79.59,metric=344.39
+FSM,FOOT_OFF_GROUND,theta=-85.78,omega=2272.67,metric=119.87
+FSM,FOOT_ON_GROUND,theta=-53.54,omega=1422.79,metric=74.89
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-9.91,omega=179.43,metric=12.60
+FSM,FOOT_ON_GROUND,theta=-6.83,omega=-22.93,metric=7.17
+FSM,FOOT_ON_GROUND,theta=-8.74,omega=-3.02,metric=8.79
+FSM,FOOT_ON_GROUND,theta=-4.27,omega=92.80,metric=5.66
+FSM,FOOT_OFF_GROUND,theta=-122.32,omega=-5647.12,metric=207.02
+FSM,FOOT_OFF_GROUND,theta=-122.32,omega=-5647.12,metric=207.02
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-317.01,omega=-517.16,metric=324.77
+FSM,FOOT_OFF_GROUND,theta=-331.71,omega=-20.70,metric=332.02
+FSM,FOOT_OFF_GROUND,theta=-333.23,omega=-13.55,metric=333.43
+FSM,FOOT_OFF_GROUND,theta=-332.17,omega=20.25,metric=332.47
+FSM,FOOT_OFF_GROUND,theta=-333.10,omega=-32.11,metric=333.58
+FSM,FOOT_OFF_GROUND,theta=-337.57,omega=-62.10,metric=338.51
+FSM,FOOT_OFF_GROUND,theta=-344.53,omega=-79.06,metric=345.72
+FSM,FOOT_ON_GROUND,theta=-53.28,omega=1422.09,metric=74.61
+FSM,FOOT_ON_GROUND,theta=-53.28,omega=1422.09,metric=74.61
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-7.63,omega=93.48,metric=9.03
+FSM,FOOT_ON_GROUND,theta=-7.36,omega=-30.42,metric=7.82
+FSM,FOOT_ON_GROUND,theta=-9.38,omega=0.65,metric=9.39
+FSM,FOOT_ON_GROUND,theta=-3.59,omega=107.26,metric=5.20
+FSM,FOOT_OFF_GROUND,theta=-66.36,omega=-7088.51,metric=172.68
+FSM,FOOT_OFF_GROUND,theta=-167.75,omega=-4993.14,metric=242.64
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-321.10,omega=-391.15,metric=326.96
+FSM,FOOT_OFF_GROUND,theta=-331.14,omega=-9.22,metric=331.27
+FSM,FOOT_OFF_GROUND,theta=-332.88,omega=-6.05,metric=332.97
+FSM,FOOT_OFF_GROUND,theta=-331.45,omega=20.67,metric=331.76
+FSM,FOOT_OFF_GROUND,theta=-333.52,omega=-34.23,metric=334.04
+FSM,FOOT_OFF_GROUND,theta=-338.59,omega=-64.70,metric=339.56
+FSM,FOOT_OFF_GROUND,theta=-345.54,omega=-77.38,metric=346.70
+FSM,FOOT_ON_GROUND,theta=-53.52,omega=1418.79,metric=74.80
+FSM,FOOT_ON_GROUND,theta=-42.36,omega=1115.63,metric=59.10
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-7.04,omega=71.35,metric=8.11
+FSM,FOOT_ON_GROUND,theta=-7.41,omega=-25.54,metric=7.79
+FSM,FOOT_ON_GROUND,theta=-8.02,omega=21.45,metric=8.34
+FSM,FOOT_ON_GROUND,theta=0.04,omega=128.66,metric=1.97
+FSM,FOOT_OFF_GROUND,theta=-122.35,omega=-5642.00,metric=206.98
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-253.54,omega=-2487.70,metric=290.86
+FSM,FOOT_OFF_GROUND,theta=-327.35,omega=-169.60,metric=329.89
+FSM,FOOT_OFF_GROUND,theta=-331.50,omega=-14.05,metric=331.71
+FSM,FOOT_OFF_GROUND,theta=-332.76,omega=11.54,metric=332.94
+FSM,FOOT_OFF_GROUND,theta=-331.40,omega=-2.63,metric=331.44
+FSM,FOOT_OFF_GROUND,theta=-334.28,omega=-53.19,metric=335.08
+FSM,FOOT_OFF_GROUND,theta=-341.16,omega=-75.55,metric=342.30
+FSM,FOOT_OFF_GROUND,theta=-136.88,omega=3598.06,metric=190.85
+FSM,FOOT_ON_GROUND,theta=-53.48,omega=1417.74,metric=74.75
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-14.26,omega=313.47,metric=18.97
+FSM,FOOT_ON_GROUND,theta=-6.59,omega=-13.70,metric=6.80
+FSM,FOOT_ON_GROUND,theta=-9.35,omega=-17.40,metric=9.61
+FSM,FOOT_ON_GROUND,theta=-6.40,omega=76.98,metric=7.56
+FSM,FOOT_OFF_GROUND,theta=-66.50,omega=-7082.00,metric=172.73
+FSM,FOOT_OFF_GROUND,theta=-66.50,omega=-7082.00,metric=172.73
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-311.48,omega=-661.50,metric=321.40
+FSM,FOOT_OFF_GROUND,theta=-330.69,omega=-26.36,metric=331.09
+FSM,FOOT_OFF_GROUND,theta=-332.44,omega=-21.91,metric=332.77
+FSM,FOOT_OFF_GROUND,theta=-331.65,omega=18.47,metric=331.92
+FSM,FOOT_OFF_GROUND,theta=-332.66,omega=-24.97,metric=333.03
+FSM,FOOT_OFF_GROUND,theta=-337.53,omega=-71.00,metric=338.59
+FSM,FOOT_OFF_GROUND,theta=-345.26,omega=-86.17,metric=346.55
+FSM,FOOT_ON_GROUND,theta=-53.47,omega=1420.34,metric=74.78
+FSM,FOOT_ON_GROUND,theta=-42.29,omega=860.15,metric=55.19
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-7.59,omega=37.34,metric=8.15
+FSM,FOOT_ON_GROUND,theta=-8.76,omega=-17.19,metric=9.01
+FSM,FOOT_ON_GROUND,theta=-7.07,omega=53.22,metric=7.87
+FSM,FOOT_ON_GROUND,theta=3.78,omega=120.13,metric=5.58
+FSM,FOOT_OFF_GROUND,theta=-122.31,omega=-5641.51,metric=206.93
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-295.81,omega=-1091.74,metric=312.19
+FSM,FOOT_OFF_GROUND,theta=-329.44,omega=-65.60,metric=330.42
+FSM,FOOT_OFF_GROUND,theta=-331.54,omega=-40.13,metric=332.14
+FSM,FOOT_OFF_GROUND,theta=-332.09,omega=25.32,metric=332.47
+FSM,FOOT_OFF_GROUND,theta=-331.29,omega=-5.42,metric=331.37
+FSM,FOOT_OFF_GROUND,theta=-335.05,omega=-58.89,metric=335.94
+FSM,FOOT_OFF_GROUND,theta=-341.65,omega=-70.53,metric=342.71
+FSM,FOOT_OFF_GROUND,theta=-136.98,omega=3601.99,metric=191.01
+FSM,FOOT_ON_GROUND,theta=-53.45,omega=1424.81,metric=74.83
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-14.19,omega=325.53,metric=19.07
+FSM,FOOT_ON_GROUND,theta=-5.76,omega=-9.42,metric=5.91
+FSM,FOOT_ON_GROUND,theta=-7.25,omega=0.84,metric=7.26
+FSM,FOOT_ON_GROUND,theta=-2.17,omega=93.32,metric=3.57
+FSM,FOOT_OFF_GROUND,theta=-122.24,omega=-6276.78,metric=216.39
+FSM,FOOT_OFF_GROUND,theta=-202.91,omega=-3570.88,metric=256.47
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-323.65,omega=-297.18,metric=328.11
+FSM,FOOT_OFF_GROUND,theta=-331.16,omega=-5.49,metric=331.24
+FSM,FOOT_OFF_GROUND,theta=-332.97,omega=-23.35,metric=333.32
+FSM,FOOT_OFF_GROUND,theta=-331.84,omega=10.72,metric=332.00
+FSM,FOOT_OFF_GROUND,theta=-332.71,omega=-32.18,metric=333.19
+FSM,FOOT_OFF_GROUND,theta=-338.00,omega=-65.90,metric=338.99
+FSM,FOOT_OFF_GROUND,theta=-345.11,omega=-79.30,metric=346.30
+FSM,FOOT_ON_GROUND,theta=-53.87,omega=1425.13,metric=75.25
+FSM,FOOT_ON_GROUND,theta=-53.87,omega=1425.13,metric=75.25
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-7.18,omega=100.50,metric=8.69
+FSM,FOOT_ON_GROUND,theta=-6.66,omega=-26.37,metric=7.05
+FSM,FOOT_ON_GROUND,theta=-7.56,omega=18.83,metric=7.84
+FSM,FOOT_ON_GROUND,theta=-0.03,omega=121.58,metric=1.85
+FSM,FOOT_OFF_GROUND,theta=-121.78,omega=-5651.85,metric=206.55
+FSM,FOOT_OFF_GROUND,theta=-230.90,omega=-2840.31,metric=273.51
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-326.03,omega=-231.44,metric=329.50
+FSM,FOOT_OFF_GROUND,theta=-331.56,omega=-1.85,metric=331.59
+FSM,FOOT_OFF_GROUND,theta=-332.15,omega=26.31,metric=332.54
+FSM,FOOT_OFF_GROUND,theta=-330.72,omega=7.38,metric=330.83
+FSM,FOOT_OFF_GROUND,theta=-332.67,omega=-34.65,metric=333.19
+FSM,FOOT_OFF_GROUND,theta=-337.63,omega=-63.44,metric=338.58
+FSM,FOOT_OFF_GROUND,theta=-344.40,omega=-76.12,metric=345.54
+FSM,FOOT_OFF_GROUND,theta=-67.90,omega=1805.78,metric=94.98
+FSM,FOOT_ON_GROUND,theta=-53.61,omega=1428.85,metric=75.04
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-8.24,omega=138.27,metric=10.31
+FSM,FOOT_ON_GROUND,theta=-6.33,omega=-23.67,metric=6.68
+FSM,FOOT_ON_GROUND,theta=-7.42,omega=13.14,metric=7.62
+FSM,FOOT_ON_GROUND,theta=-0.54,omega=116.58,metric=2.29
+FSM,FOOT_OFF_GROUND,theta=-122.20,omega=-5648.59,metric=206.93
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-231.20,omega=-2834.17,metric=273.72
+FSM,FOOT_OFF_GROUND,theta=-325.81,omega=-226.66,metric=329.21
+FSM,FOOT_OFF_GROUND,theta=-331.44,omega=-15.41,metric=331.68
+FSM,FOOT_OFF_GROUND,theta=-333.23,omega=10.65,metric=333.39
+FSM,FOOT_OFF_GROUND,theta=-331.66,omega=7.20,metric=331.77
+FSM,FOOT_OFF_GROUND,theta=-333.58,omega=-49.64,metric=334.32
+FSM,FOOT_OFF_GROUND,theta=-339.73,omega=-65.29,metric=340.71
+FSM,FOOT_OFF_GROUND,theta=-275.25,omega=7121.98,metric=382.08
+FSM,FOOT_ON_GROUND,theta=-53.32,omega=1427.68,metric=74.74
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-26.36,omega=688.12,metric=36.68
+FSM,FOOT_ON_GROUND,theta=-5.89,omega=27.11,metric=6.30
+FSM,FOOT_ON_GROUND,theta=-7.66,omega=-24.07,metric=8.02
+FSM,FOOT_ON_GROUND,theta=-7.30,omega=42.04,metric=7.93
+FSM,FOOT_ON_GROUND,theta=2.43,omega=117.09,metric=4.19
+FSM,FOOT_OFF_GROUND,theta=-66.20,omega=-7090.98,metric=172.56
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-285.91,omega=-1394.35,metric=306.83
+FSM,FOOT_OFF_GROUND,theta=-329.80,omega=-85.60,metric=331.09
+FSM,FOOT_OFF_GROUND,theta=-332.06,omega=-23.98,metric=332.42
+FSM,FOOT_OFF_GROUND,theta=-332.43,omega=9.62,metric=332.57
+FSM,FOOT_OFF_GROUND,theta=-331.59,omega=-4.93,metric=331.66
+FSM,FOOT_OFF_GROUND,theta=-335.02,omega=-62.04,metric=335.95
+FSM,FOOT_OFF_GROUND,theta=-341.64,omega=-71.26,metric=342.71
+FSM,FOOT_OFF_GROUND,theta=-136.96,omega=3603.18,metric=191.00
+FSM,FOOT_ON_GROUND,theta=-53.24,omega=1426.16,metric=74.63
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-13.61,omega=317.52,metric=18.37
+FSM,FOOT_ON_GROUND,theta=-5.78,omega=-13.66,metric=5.99
+FSM,FOOT_ON_GROUND,theta=-8.14,omega=-10.56,metric=8.30
+FSM,FOOT_ON_GROUND,theta=-4.50,omega=81.89,metric=5.72
+FSM,FOOT_ON_GROUND,theta=-65.39,omega=-7092.28,metric=171.77
+FSM,FOOT_OFF_GROUND,theta=-121.88,omega=-5649.24,metric=206.62
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-310.99,omega=-663.31,metric=320.94
+FSM,FOOT_OFF_GROUND,theta=-330.38,omega=-29.55,metric=330.82
+FSM,FOOT_OFF_GROUND,theta=-332.45,omega=-19.84,metric=332.75
+FSM,FOOT_OFF_GROUND,theta=-331.39,omega=21.00,metric=331.71
+FSM,FOOT_OFF_GROUND,theta=-332.13,omega=-14.94,metric=332.36
+FSM,FOOT_OFF_GROUND,theta=-336.67,omega=-62.67,metric=337.61
+FSM,FOOT_OFF_GROUND,theta=-343.40,omega=-76.12,metric=344.55
+FSM,FOOT_OFF_GROUND,theta=-85.66,omega=2278.99,metric=119.85
+FSM,FOOT_ON_GROUND,theta=-53.30,omega=1429.30,metric=74.74
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-9.63,omega=179.16,metric=12.32
+FSM,FOOT_ON_GROUND,theta=-5.95,omega=-18.98,metric=6.24
+FSM,FOOT_ON_GROUND,theta=-7.17,omega=8.28,metric=7.30
+FSM,FOOT_ON_GROUND,theta=-0.85,omega=114.09,metric=2.56
+FSM,FOOT_OFF_GROUND,theta=-66.04,omega=-7096.49,metric=172.49
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-231.77,omega=-2840.64,metric=274.38
+FSM,FOOT_OFF_GROUND,theta=-326.70,omega=-222.30,metric=330.04
+FSM,FOOT_OFF_GROUND,theta=-331.64,omega=4.75,metric=331.71
+FSM,FOOT_OFF_GROUND,theta=-332.22,omega=5.68,metric=332.30
+FSM,FOOT_OFF_GROUND,theta=-330.78,omega=8.90,metric=330.91
+FSM,FOOT_OFF_GROUND,theta=-331.84,omega=-27.91,metric=332.26
+FSM,FOOT_OFF_GROUND,theta=-336.82,omega=-67.42,metric=337.83
+FSM,FOOT_OFF_GROUND,theta=-343.81,omega=-79.27,metric=345.00
+FSM,FOOT_OFF_GROUND,theta=-67.57,omega=1802.75,metric=94.61
+FSM,FOOT_ON_GROUND,theta=-53.30,omega=1426.50,metric=74.70
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-8.42,omega=130.29,metric=10.37
+FSM,FOOT_ON_GROUND,theta=-6.95,omega=-27.57,metric=7.36
+FSM,FOOT_ON_GROUND,theta=-7.68,omega=28.74,metric=8.11
+FSM,FOOT_ON_GROUND,theta=0.51,omega=121.24,metric=2.33
+FSM,FOOT_OFF_GROUND,theta=-65.89,omega=-7092.90,metric=172.28
+FSM,FOOT_OFF_GROUND,theta=-253.94,omega=-2248.08,metric=287.66
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-328.20,omega=-171.16,metric=330.76
+FSM,FOOT_OFF_GROUND,theta=-332.04,omega=-8.39,metric=332.16
+FSM,FOOT_OFF_GROUND,theta=-332.85,omega=17.41,metric=333.11
+FSM,FOOT_OFF_GROUND,theta=-331.47,omega=-10.96,metric=331.64
+FSM,FOOT_OFF_GROUND,theta=-333.69,omega=-49.11,metric=334.42
+FSM,FOOT_OFF_GROUND,theta=-340.32,omega=-70.52,metric=341.38
+FSM,FOOT_OFF_GROUND,theta=-218.38,omega=5682.20,metric=303.61
+FSM,FOOT_ON_GROUND,theta=-53.27,omega=1427.04,metric=74.68
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-20.99,omega=533.09,metric=28.98
+FSM,FOOT_ON_GROUND,theta=-5.59,omega=12.22,metric=5.77
+FSM,FOOT_ON_GROUND,theta=-7.14,omega=-10.70,metric=7.30
+FSM,FOOT_ON_GROUND,theta=-3.85,omega=77.85,metric=5.02
+FSM,FOOT_OFF_GROUND,theta=-122.09,omega=-5649.93,metric=206.84
+FSM,FOOT_OFF_GROUND,theta=-122.09,omega=-5649.93,metric=206.84
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-316.76,omega=-514.43,metric=324.48
+FSM,FOOT_OFF_GROUND,theta=-331.06,omega=-15.70,metric=331.30
+FSM,FOOT_OFF_GROUND,theta=-332.80,omega=-30.08,metric=333.25
+FSM,FOOT_OFF_GROUND,theta=-331.40,omega=35.92,metric=331.94
+FSM,FOOT_OFF_GROUND,theta=-331.57,omega=-20.52,metric=331.88
+FSM,FOOT_OFF_GROUND,theta=-336.34,omega=-66.45,metric=337.33
+FSM,FOOT_OFF_GROUND,theta=-343.23,omega=-74.45,metric=344.35
+FSM,FOOT_OFF_GROUND,theta=-85.57,omega=2278.06,metric=119.74
+FSM,FOOT_ON_GROUND,theta=-53.23,omega=1428.81,metric=74.66
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-9.27,omega=184.78,metric=12.04
+FSM,FOOT_ON_GROUND,theta=-5.75,omega=-23.01,metric=6.10
+FSM,FOOT_ON_GROUND,theta=-7.33,omega=6.60,metric=7.43
+FSM,FOOT_ON_GROUND,theta=-0.81,omega=117.58,metric=2.58
+FSM,FOOT_OFF_GROUND,theta=-122.28,omega=-5649.50,metric=207.02
+FSM,FOOT_OFF_GROUND,theta=-231.31,omega=-2836.02,metric=273.85
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-325.58,omega=-218.41,metric=328.86
+FSM,FOOT_OFF_GROUND,theta=-330.76,omega=-9.47,metric=330.90
+FSM,FOOT_OFF_GROUND,theta=-332.15,omega=18.98,metric=332.44
+FSM,FOOT_OFF_GROUND,theta=-331.11,omega=-7.09,metric=331.22
+FSM,FOOT_OFF_GROUND,theta=-332.74,omega=-37.25,metric=333.30
+FSM,FOOT_OFF_GROUND,theta=-338.88,omega=-67.20,metric=339.89
+FSM,FOOT_OFF_GROUND,theta=-274.81,omega=7118.50,metric=381.59
+FSM,FOOT_ON_GROUND,theta=-53.15,omega=1422.19,metric=74.48
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-26.27,omega=858.54,metric=39.15
+FSM,FOOT_ON_GROUND,theta=-6.38,omega=22.77,metric=6.72
+FSM,FOOT_ON_GROUND,theta=-8.24,omega=-21.67,metric=8.56
+FSM,FOOT_ON_GROUND,theta=-6.12,omega=65.85,metric=7.10
+FSM,FOOT_ON_GROUND,theta=5.15,omega=114.99,metric=6.88
+FSM,FOOT_OFF_GROUND,theta=-122.16,omega=-5643.82,metric=206.81
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-304.48,omega=-853.07,metric=317.27
+FSM,FOOT_OFF_GROUND,theta=-329.92,omega=-38.24,metric=330.49
+FSM,FOOT_OFF_GROUND,theta=-331.38,omega=-26.28,metric=331.78
+FSM,FOOT_OFF_GROUND,theta=-330.50,omega=15.42,metric=330.73
+FSM,FOOT_OFF_GROUND,theta=-330.51,omega=-16.48,metric=330.76
+FSM,FOOT_OFF_GROUND,theta=-334.23,omega=-59.49,metric=335.12
+FSM,FOOT_OFF_GROUND,theta=-340.81,omega=-71.55,metric=341.88
+FSM,FOOT_OFF_GROUND,theta=-218.82,omega=5681.27,metric=304.04
+FSM,FOOT_ON_GROUND,theta=-53.76,omega=1424.26,metric=75.12
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-21.53,omega=537.45,metric=29.59
+FSM,FOOT_ON_GROUND,theta=-5.08,omega=18.84,metric=5.36
+FSM,FOOT_ON_GROUND,theta=-5.36,omega=1.95,metric=5.39
+FSM,FOOT_ON_GROUND,theta=-0.15,omega=102.60,metric=1.69
+FSM,FOOT_OFF_GROUND,theta=-66.26,omega=-7875.68,metric=184.39
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-254.30,omega=-2243.65,metric=287.95
+FSM,FOOT_OFF_GROUND,theta=-327.92,omega=-163.12,metric=330.37
+FSM,FOOT_OFF_GROUND,theta=-330.73,omega=10.25,metric=330.88
+FSM,FOOT_OFF_GROUND,theta=-332.02,omega=-19.33,metric=332.31
+FSM,FOOT_OFF_GROUND,theta=-329.17,omega=30.08,metric=329.62
+FSM,FOOT_OFF_GROUND,theta=-329.48,omega=-14.96,metric=329.70
+FSM,FOOT_OFF_GROUND,theta=-333.25,omega=-53.85,metric=334.06
+FSM,FOOT_OFF_GROUND,theta=-338.52,omega=-53.03,metric=339.31
+FSM,FOOT_OFF_GROUND,theta=-344.46,omega=-62.34,metric=345.40
+FSM,FOOT_OFF_GROUND,theta=-108.44,omega=2883.88,metric=151.70
+FSM,FOOT_ON_GROUND,theta=-52.86,omega=1444.23,metric=74.52
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-8.91,omega=273.00,metric=13.01
+FSM,FOOT_ON_GROUND,theta=-1.47,omega=-0.50,metric=1.47
+FSM,FOOT_ON_GROUND,theta=-3.12,omega=-1.10,metric=3.14
+FSM,FOOT_ON_GROUND,theta=0.59,omega=67.57,metric=1.61
+FSM,FOOT_OFF_GROUND,theta=-121.38,omega=-5675.01,metric=206.50
+FSM,FOOT_OFF_GROUND,theta=-166.64,omega=-4114.50,metric=228.35
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-328.12,omega=-340.50,metric=333.22
+FSM,FOOT_OFF_GROUND,theta=-338.31,omega=-24.32,metric=338.67
+FSM,FOOT_OFF_GROUND,theta=-342.03,omega=-52.74,metric=342.82
+FSM,FOOT_OFF_GROUND,theta=-343.78,omega=24.58,metric=344.15
+FSM,FOOT_OFF_GROUND,theta=-341.47,omega=-0.16,metric=341.47
+FSM,FOOT_OFF_GROUND,theta=-345.07,omega=-55.26,metric=345.90
+FSM,FOOT_OFF_GROUND,theta=-85.24,omega=2299.21,metric=119.73
+FSM,FOOT_ON_GROUND,theta=-52.35,omega=1458.10,metric=74.22
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-4.50,omega=229.15,metric=7.94
+FSM,FOOT_ON_GROUND,theta=2.27,omega=5.80,metric=2.36
+FSM,FOOT_ON_GROUND,theta=1.44,omega=-11.73,metric=1.62
+FSM,FOOT_ON_GROUND,theta=0.43,omega=-8.15,metric=0.55
+FSM,FOOT_ON_GROUND,theta=0.00,omega=5.45,metric=0.09
+FSM,FOOT_ON_GROUND,theta=4.26,omega=66.84,metric=5.26
+FSM,FOOT_OFF_GROUND,theta=-121.81,omega=-5693.33,metric=207.21
+FSM,FOOT_OFF_GROUND,theta=-274.71,omega=-1863.32,metric=302.66
+MOTOR,START,HTTP/1.1 200 OK
+FSM,FOOT_OFF_GROUND,theta=-59.11,omega=1640.53,metric=83.72
+FSM,FOOT_ON_GROUND,theta=-46.12,omega=1299.02,metric=65.61
+MOTOR,STOP,HTTP/1.1 200 OK
+FSM,FOOT_ON_GROUND,theta=-2.40,omega=207.76,metric=5.52
+FSM,FOOT_ON_GROUND,theta=1.94,omega=4.93,metric=2.02
+FSM,FOOT_ON_GROUND,theta=2.19,omega=-11.52,metric=2.36
+FSM,FOOT_ON_GROUND,theta=-0.55,omega=-34.05,metric=1.06
+FSM,FOOT_ON_GROUND,theta=-2.66,omega=-10.79,metric=2.82
+FSM,FOOT_ON_GROUND,theta=-3.52,omega=-7.33,metric=3.63
+FSM,FOOT_ON_GROUND,theta=-4.02,omega=-4.19,metric=4.08
+FSM,FOOT_ON_GROUND,theta=-4.43,omega=-3.06,metric=4.48
+FSM,FOOT_ON_GROUND,theta=-4.62,omega=0.87,metric=4.63
+FSM,FOOT_ON_GROUND,theta=-4.57,omega=0.58,metric=4.58
+FSM,FOOT_ON_GROUND,theta=-4.38,omega=2.44,metric=4.42
+FSM,FOOT_ON_GROUND,theta=-4.14,omega=2.90,metric=4.18
+FSM,FOOT_ON_GROUND,theta=-3.69,omega=4.61,metric=3.76
+FSM,FOOT_ON_GROUND,theta=-3.20,omega=3.53,metric=3.25
+FSM,FOOT_ON_GROUND,theta=-2.76,omega=3.59,metric=2.81
+FSM,FOOT_ON_GROUND,theta=-2.61,omega=0.29,metric=2.62
+FSM,FOOT_ON_GROUND,theta=-2.64,omega=-0.57,metric=2.65
