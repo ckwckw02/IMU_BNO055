@@ -25,12 +25,10 @@ static const int SHANK_AXIS = 0;
 static const int AP_AXIS = 1;
 
 /* Metric = pitch excursion + weighted pitch speed. */
-static const float OMEGA_WEIGHT = 0.015f;
+static const float OMEGA_WEIGHT = 0.15f;
 static const float OFF_RANGE_FRACTION = 0.45f;
-static const float ON_RANGE_FRACTION = 0.20f;
-static const float MIN_OFF_THRESHOLD = 8.0f;
-static const float MIN_ON_THRESHOLD = 3.0f;
-static const uint32_t MIN_STATE_TIME_MS = 120;
+static const float ON_RANGE_FRACTION = 0.4f;
+static const uint32_t MIN_STATE_TIME_MS = 60;
 
 Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);
 
@@ -44,6 +42,13 @@ static const uint8_t MOTOR_QUEUE_LEN = 4;
 static const char *stateName(bool footOffGround)
 {
   return footOffGround ? "FOOT_OFF_GROUND" : "FOOT_ON_GROUND";
+}
+
+static float wrapAngleDeg(float angle)
+{
+  while (angle > 180.0f) angle -= 360.0f;
+  while (angle <= -180.0f) angle += 360.0f;
+  return angle;
 }
 
 static void queueMotorCommand(bool start)
@@ -130,18 +135,22 @@ void imuTask(void *arg)
 {
   (void)arg;
   TickType_t lastWake = xTaskGetTickCount();
-  enum CalibrationStage { CAL_STILL, CAL_WALK, CAL_DONE } stage = CAL_STILL;
-  const uint32_t calibrationStart = millis();
+  enum Stage { ST_IDLE, ST_STILL, ST_WALK, ST_FSM } stage = ST_IDLE;
+  uint32_t stageStart = 0;
   uint32_t lastCalStatus = 0;
   float stillPitchSum = 0.0f;
   uint32_t stillCount = 0;
   float walkMetricMin = 1.0e9f;
   float walkMetricMax = -1.0e9f;
+  bool pitchCalibrated = false;
+  bool thresholdsCalibrated = false;
   float previousPitch = 0.0f;
+  float previousRawPitch = 0.0f;
+  float unwrappedPitch = 0.0f;
   float filteredPitch = 0.0f;
   float pitchOffset = 0.0f;
-  float offThreshold = MIN_OFF_THRESHOLD;
-  float onThreshold = MIN_ON_THRESHOLD;
+  float offThreshold = 0.0f;
+  float onThreshold = 0.0f;
   bool footOffGround = false;
   uint32_t lastStateChange = 0;
   uint32_t lastSample = 0;
@@ -152,20 +161,74 @@ void imuTask(void *arg)
     sensors_event_t gravityData;
     bno.getEvent(&gravityData, Adafruit_BNO055::VECTOR_GRAVITY);
     const uint32_t now = millis();
-    const float pitch = gravityPitchDeg(gravityData);
+    const float rawPitch = gravityPitchDeg(gravityData);
     if (lastSample == 0)
     {
-      filteredPitch = pitch;
-      previousPitch = pitch;
+      previousRawPitch = rawPitch;
+      unwrappedPitch = rawPitch;
+      filteredPitch = unwrappedPitch;
+      previousPitch = filteredPitch;
       lastSample = now;
+    }
+    else
+    {
+      // atan2f() wraps at +/-180 degrees. Track the shortest change so
+      // calibration does not average -179 and +179 as if they were far apart.
+      unwrappedPitch += wrapAngleDeg(rawPitch - previousRawPitch);
+      previousRawPitch = rawPitch;
     }
     const float dt = max(0.001f, (now - lastSample) * 0.001f);
     lastSample = now;
-    filteredPitch += 0.20f * (pitch - filteredPitch);
+    filteredPitch += 0.20f * (unwrappedPitch - filteredPitch);
     const float omega = (filteredPitch - previousPitch) / dt;
     previousPitch = filteredPitch;
 
-    if (stage == CAL_STILL)
+    // Serial commands: s = still calibration, w = walk calibration, f = FSM mode.
+    while (Serial.available())
+    {
+      const char c = (char)Serial.read();
+      if (c == 's' || c == 'w' || c == 'f')
+      {
+        stageStart = now;
+        lastCalStatus = now;
+        if (c == 's')
+        {
+          stage = ST_STILL;
+          stillPitchSum = 0.0f;
+          stillCount = 0;
+          pitchCalibrated = false;
+          thresholdsCalibrated = false;
+          Serial.println(F("CAL,STILL_START,stand still for 5 seconds."));
+        }
+        else if (c == 'w')
+        {
+          if (!pitchCalibrated)
+            Serial.println(F("CAL,WALK_REJECTED,run still calibration first (s)."));
+          else
+          {
+            stage = ST_WALK;
+            walkMetricMin = 1.0e9f;
+            walkMetricMax = -1.0e9f;
+            Serial.println(F("CAL,WALK_START,walk naturally for 8 seconds."));
+          }
+        }
+        else if (c == 'f')
+        {
+          if (!pitchCalibrated || !thresholdsCalibrated)
+            Serial.println(F("FSM,REJECTED,calibrate first: s then w."));
+          else
+          {
+            stage = ST_FSM;
+            footOffGround = false;
+            lastStateChange = now;
+            Serial.println(F("FSM,FOOT_ON_GROUND,STARTED"));
+            queueMotorCommand(false);
+          }
+        }
+      }
+    }
+
+    if (stage == ST_STILL)
     {
       stillPitchSum += filteredPitch;
       stillCount++;
@@ -173,18 +236,18 @@ void imuTask(void *arg)
       {
         lastCalStatus = now;
         Serial.printf("CAL,STILL,%lu/%lu ms\n",
-                      (unsigned long)(now - calibrationStart),
+                      (unsigned long)(now - stageStart),
                       (unsigned long)STILL_CAL_MS);
       }
-      if (now - calibrationStart >= STILL_CAL_MS && stillCount > 20)
+      if (now - stageStart >= STILL_CAL_MS && stillCount > 20)
       {
         pitchOffset = stillPitchSum / stillCount;
-        stage = CAL_WALK;
-        lastCalStatus = now;
-        Serial.println(F("CAL,STILL_DONE,now walk naturally."));
+        pitchCalibrated = true;
+        stage = ST_IDLE;
+        Serial.printf("CAL,STILL_DONE,pitch_offset=%.2f\n", pitchOffset);
       }
     }
-    else if (stage == CAL_WALK)
+    else if (stage == ST_WALK)
     {
       const float theta = filteredPitch - pitchOffset;
       const float metric = fabsf(theta) + OMEGA_WEIGHT * fabsf(omega);
@@ -194,27 +257,22 @@ void imuTask(void *arg)
       {
         lastCalStatus = now;
         Serial.printf("CAL,WALK,%lu/%lu ms,range=%.2f..%.2f\n",
-                      (unsigned long)(now - calibrationStart - STILL_CAL_MS),
+                      (unsigned long)(now - stageStart),
                       (unsigned long)WALK_CAL_MS, walkMetricMin, walkMetricMax);
       }
-      if (now - calibrationStart >= STILL_CAL_MS + WALK_CAL_MS)
+      if (now - stageStart >= WALK_CAL_MS)
       {
         const float range = max(1.0f, walkMetricMax - walkMetricMin);
-        offThreshold = max(MIN_OFF_THRESHOLD,
-                           walkMetricMin + OFF_RANGE_FRACTION * range);
-        onThreshold = max(MIN_ON_THRESHOLD,
-                          walkMetricMin + ON_RANGE_FRACTION * range);
+        offThreshold = walkMetricMin + OFF_RANGE_FRACTION * range;
+        onThreshold = walkMetricMin + ON_RANGE_FRACTION * range;
         if (onThreshold >= offThreshold) onThreshold = 0.5f * offThreshold;
-        stage = CAL_DONE;
-        footOffGround = false;
-        lastStateChange = now;
+        thresholdsCalibrated = true;
+        stage = ST_IDLE;
         Serial.printf("CAL,DONE,pitch_offset=%.2f,on=%.2f,off=%.2f\n",
                       pitchOffset, onThreshold, offThreshold);
-        Serial.println(F("FSM,FOOT_ON_GROUND,STARTED"));
-        queueMotorCommand(false);
       }
     }
-    else
+    else if (stage == ST_FSM)
     {
       const float theta = filteredPitch - pitchOffset;
       const float metric = fabsf(theta) + OMEGA_WEIGHT * fabsf(omega);
@@ -280,7 +338,7 @@ void setup(void)
     Serial.println(F("ERROR,MOTOR_QUEUE_CREATE_FAILED"));
     while (true) delay(1000);
   }
-  Serial.println(F("CAL,BEGIN,stand still 5 seconds; then walk 8 seconds."));
+  Serial.println(F("READY,type s = still cal (5s), w = walk cal (8s), f = FSM mode."));
   xTaskCreatePinnedToCore(imuTask, "imu_rt", 4096, nullptr, 5, nullptr, 0);
   xTaskCreatePinnedToCore(motorTask, "motor_http", 4096, nullptr, 3, nullptr, 0);
 }
