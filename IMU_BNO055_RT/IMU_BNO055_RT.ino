@@ -39,6 +39,9 @@ struct MotorCommand {
 static QueueHandle_t motorQueue = nullptr;
 static const uint8_t MOTOR_QUEUE_LEN = 4;
 
+/* BNO055 sensor calibration (accel/gyro/mag) required before use. */
+static bool imuCalibrated = false;
+
 static const char *stateName(bool footOffGround)
 {
   return footOffGround ? "FOOT_OFF_GROUND" : "FOOT_ON_GROUND";
@@ -72,12 +75,47 @@ static void loadCalibrationOffsets()
     if (n == sizeof(calibData))
     {
       bno.setSensorOffsets(calibData);
+      imuCalibrated = true;
       Serial.println(F("BNO055 calibration loaded."));
     }
     else Serial.println(F("Warning: calibration data missing."));
   }
   else Serial.println(F("Warning: no matching BNO055 calibration."));
   prefs.end();
+}
+
+static void saveCalibrationOffsets()
+{
+  adafruit_bno055_offsets_t calibData;
+  sensor_t sensor;
+  bno.getSensorOffsets(calibData);
+  bno.getSensor(&sensor);
+  Preferences prefs;
+  prefs.begin("bno055", false);
+  prefs.putLong("bnoID", (long)sensor.sensor_id);
+  prefs.putBytes("calibData", &calibData, sizeof(calibData));
+  prefs.end();
+}
+
+static void printImuCalStatus()
+{
+  uint8_t system, gyro, accel, mag;
+  bno.getCalibration(&system, &gyro, &accel, &mag);
+  Serial.printf("CAL,IMU,SYS:%d,G:%d,A:%d,M:%d\n",
+                system, gyro, accel, mag);
+}
+
+static bool hasImuCalibration()
+{
+  Preferences prefs;
+  sensor_t sensor;
+  bno.getSensor(&sensor);
+  prefs.begin("bno055", true);
+  const long storedBnoID = prefs.getLong("bnoID", 0);
+  adafruit_bno055_offsets_t calibData;
+  const size_t n = prefs.getBytes("calibData", &calibData, sizeof(calibData));
+  prefs.end();
+  return storedBnoID == (long)sensor.sensor_id && n == sizeof(calibData);
 }
 
 static bool motorHttpGet(const char *path)
@@ -135,7 +173,7 @@ void imuTask(void *arg)
 {
   (void)arg;
   TickType_t lastWake = xTaskGetTickCount();
-  enum Stage { ST_IDLE, ST_STILL, ST_WALK, ST_FSM } stage = ST_IDLE;
+  enum Stage { ST_IDLE, ST_IMU_CAL, ST_STILL, ST_WALK, ST_FSM } stage = ST_IDLE;
   uint32_t stageStart = 0;
   uint32_t lastCalStatus = 0;
   float stillPitchSum = 0.0f;
@@ -162,7 +200,9 @@ void imuTask(void *arg)
     bno.getEvent(&gravityData, Adafruit_BNO055::VECTOR_GRAVITY);
     const uint32_t now = millis();
     const float rawPitch = gravityPitchDeg(gravityData);
-    if (lastSample == 0)
+    // Re-seed the pitch filter on boot and after IMU calibration, because
+    // the figure-8 mag motion corrupts the filtered pitch history.
+    if (lastSample == 0 || stage == ST_IMU_CAL)
     {
       previousRawPitch = rawPitch;
       unwrappedPitch = rawPitch;
@@ -183,12 +223,31 @@ void imuTask(void *arg)
     const float omega = (filteredPitch - previousPitch) / dt;
     previousPitch = filteredPitch;
 
-    // Serial commands: s = still calibration, w = walk calibration, f = FSM mode.
+    // Serial commands: i = IMU calibration, s = still calibration,
+    // w = walk calibration, f = FSM mode.
     while (Serial.available())
     {
       const char c = (char)Serial.read();
-      if (c == 's' || c == 'w' || c == 'f')
+      if (c == 'i')
       {
+        // Stop the motor if the FSM left it running before calibration.
+        if (footOffGround)
+        {
+          footOffGround = false;
+          queueMotorCommand(false);
+        }
+        stage = ST_IMU_CAL;
+        stageStart = now;
+        lastCalStatus = now;
+        Serial.println(F("CAL,IMU_START,stand still then draw figure 8 with the sensor."));
+      }
+      else if (c == 's' || c == 'w' || c == 'f')
+      {
+        if (!imuCalibrated)
+        {
+          Serial.println(F("REJECTED,run IMU calibration first (i)."));
+          continue;
+        }
         stageStart = now;
         lastCalStatus = now;
         if (c == 's')
@@ -228,7 +287,25 @@ void imuTask(void *arg)
       }
     }
 
-    if (stage == ST_STILL)
+    if (stage == ST_IMU_CAL)
+    {
+      sensors_event_t event;
+      bno.getEvent(&event);
+      if (now - lastCalStatus >= CAL_STATUS_PERIOD_MS)
+      {
+        lastCalStatus = now;
+        printImuCalStatus();
+      }
+      if (bno.isFullyCalibrated())
+      {
+        saveCalibrationOffsets();
+        imuCalibrated = true;
+        stage = ST_IDLE;
+        footOffGround = false;
+        Serial.println(F("CAL,IMU_DONE,calibration saved to Preferences."));
+      }
+    }
+    else if (stage == ST_STILL)
     {
       stillPitchSum += filteredPitch;
       stillCount++;
@@ -315,7 +392,10 @@ void setup(void)
     while (true) delay(1000);
   }
   delay(1000);
-  loadCalibrationOffsets();
+  if (hasImuCalibration())
+    loadCalibrationOffsets();
+  else
+    Serial.println(F("CAL,IMU_REQUIRED,no calibration data in Preferences."));
 
   Serial.printf("WIFI,CONNECTING,%s\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
@@ -338,7 +418,10 @@ void setup(void)
     Serial.println(F("ERROR,MOTOR_QUEUE_CREATE_FAILED"));
     while (true) delay(1000);
   }
-  Serial.println(F("READY,type s = still cal (5s), w = walk cal (8s), f = FSM mode."));
+  if (imuCalibrated)
+    Serial.println(F("READY,type s = still cal (5s), w = walk cal (8s), f = FSM mode."));
+  else
+    Serial.println(F("READY,IMU calibration required. type i to start."));
   xTaskCreatePinnedToCore(imuTask, "imu_rt", 4096, nullptr, 5, nullptr, 0);
   xTaskCreatePinnedToCore(motorTask, "motor_http", 4096, nullptr, 3, nullptr, 0);
 }
