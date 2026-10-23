@@ -30,6 +30,11 @@ static const float OFF_RANGE_FRACTION = 0.45f;
 static const float ON_RANGE_FRACTION = 0.4f;
 static const uint32_t MIN_STATE_TIME_MS = 60;
 
+/* Mode 'a' (advanced capture): auto pitch-offset calibration window before
+   full-rate logging starts. The log is post-processed by imu_adv_tune.py to
+   back-calculate the four constants above. */
+static const uint32_t ADV_STILL_MS = 3000;
+
 Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);
 
 struct MotorCommand {
@@ -61,6 +66,20 @@ static void queueMotorCommand(bool start)
   xQueueSend(motorQueue, &command, 0);
 }
 
+/* Print the raw BNO055 calibration offsets so the user can see exactly
+   what is being loaded from / saved to Preferences. */
+static void printCalibOffsets(const char *tag, const adafruit_bno055_offsets_t &d)
+{
+  Serial.printf("CALIB,%s,GYRO,%d,%d,%d\n", tag,
+                (int)d.gyro_offset_x, (int)d.gyro_offset_y, (int)d.gyro_offset_z);
+  Serial.printf("CALIB,%s,ACCEL,%d,%d,%d\n", tag,
+                (int)d.accel_offset_x, (int)d.accel_offset_y, (int)d.accel_offset_z);
+  Serial.printf("CALIB,%s,MAG,%d,%d,%d\n", tag,
+                (int)d.mag_offset_x, (int)d.mag_offset_y, (int)d.mag_offset_z);
+  Serial.printf("CALIB,%s,RADIUS,accel:%d,mag:%d\n", tag,
+                (int)d.accel_radius, (int)d.mag_radius);
+}
+
 static void loadCalibrationOffsets()
 {
   Preferences prefs;
@@ -77,6 +96,7 @@ static void loadCalibrationOffsets()
       bno.setSensorOffsets(calibData);
       imuCalibrated = true;
       Serial.println(F("BNO055 calibration loaded."));
+      printCalibOffsets("LOAD", calibData);
     }
     else Serial.println(F("Warning: calibration data missing."));
   }
@@ -95,6 +115,8 @@ static void saveCalibrationOffsets()
   prefs.putLong("bnoID", (long)sensor.sensor_id);
   prefs.putBytes("calibData", &calibData, sizeof(calibData));
   prefs.end();
+  Serial.println(F("BNO055 calibration saved."));
+  printCalibOffsets("SAVE", calibData);
 }
 
 static void printImuCalStatus()
@@ -173,7 +195,7 @@ void imuTask(void *arg)
 {
   (void)arg;
   TickType_t lastWake = xTaskGetTickCount();
-  enum Stage { ST_IDLE, ST_IMU_CAL, ST_STILL, ST_WALK, ST_FSM } stage = ST_IDLE;
+  enum Stage { ST_IDLE, ST_IMU_CAL, ST_STILL, ST_WALK, ST_FSM, ST_ADV_CAL, ST_ADV } stage = ST_IDLE;
   uint32_t stageStart = 0;
   uint32_t lastCalStatus = 0;
   float stillPitchSum = 0.0f;
@@ -193,6 +215,13 @@ void imuTask(void *arg)
   uint32_t lastStateChange = 0;
   uint32_t lastSample = 0;
   uint32_t lastDebug = 0;
+  /* Mode 'a' advanced capture: per-sample raw signals + reference FSM. */
+  uint32_t advSampleIndex = 0;
+  uint32_t advLastPrint = 0;
+  uint32_t advLastStateChange = 0;
+  bool advFootOffGround = false;
+  float advMetricMin = 1.0e9f;
+  float advMetricMax = -1.0e9f;
 
   for (;;)
   {
@@ -224,7 +253,8 @@ void imuTask(void *arg)
     previousPitch = filteredPitch;
 
     // Serial commands: i = IMU calibration, s = still calibration,
-    // w = walk calibration, f = FSM mode.
+    // w = walk calibration, f = FSM mode, a = advanced capture (tuning log),
+    // d = dump current FSM parameters.
     while (Serial.available())
     {
       const char c = (char)Serial.read();
@@ -240,6 +270,41 @@ void imuTask(void *arg)
         stageStart = now;
         lastCalStatus = now;
         Serial.println(F("CAL,IMU_START,stand still then draw figure 8 with the sensor."));
+      }
+      else if (c == 'd')
+      {
+        Serial.printf("PARAM,OMEGA_WEIGHT,%.4f\n", OMEGA_WEIGHT);
+        Serial.printf("PARAM,OFF_RANGE_FRACTION,%.4f\n", OFF_RANGE_FRACTION);
+        Serial.printf("PARAM,ON_RANGE_FRACTION,%.4f\n", ON_RANGE_FRACTION);
+        Serial.printf("PARAM,MIN_STATE_TIME_MS,%lu\n", (unsigned long)MIN_STATE_TIME_MS);
+        Serial.printf("PARAM,PITCH_OFFSET,%.2f\n", pitchOffset);
+        Serial.printf("PARAM,ON_THRESHOLD,%.2f\n", onThreshold);
+        Serial.printf("PARAM,OFF_THRESHOLD,%.2f\n", offThreshold);
+      }
+      else if (c == 'a')
+      {
+        if (stage == ST_ADV || stage == ST_ADV_CAL)
+        {
+          stage = ST_IDLE;
+          // The auto pitch offset taken here is capture-specific; do not let
+          // the FSM reuse it without a fresh still calibration.
+          thresholdsCalibrated = false;
+          Serial.printf("ADV,STOP,samples:%lu,metric=%.2f..%.2f\n",
+                        (unsigned long)advSampleIndex, advMetricMin, advMetricMax);
+        }
+        else if (!imuCalibrated)
+        {
+          Serial.println(F("REJECTED,run IMU calibration first (i)."));
+        }
+        else
+        {
+          stage = ST_ADV_CAL;
+          stageStart = now;
+          lastCalStatus = now;
+          stillPitchSum = 0.0f;
+          stillCount = 0;
+          Serial.println(F("ADV,STILL_START,stand still for 3 seconds."));
+        }
       }
       else if (c == 's' || c == 'w' || c == 'f')
       {
@@ -349,6 +414,78 @@ void imuTask(void *arg)
                       pitchOffset, onThreshold, offThreshold);
       }
     }
+    else if (stage == ST_ADV_CAL)
+    {
+      // Auto still calibration for mode 'a': same idea as 's' but shorter and
+      // it does not mark the FSM as pitch-calibrated (capture is self-contained).
+      stillPitchSum += filteredPitch;
+      stillCount++;
+      if (now - lastCalStatus >= CAL_STATUS_PERIOD_MS)
+      {
+        lastCalStatus = now;
+        Serial.printf("ADV,STILL,%lu/%lu ms\n",
+                      (unsigned long)(now - stageStart),
+                      (unsigned long)ADV_STILL_MS);
+      }
+      if (now - stageStart >= ADV_STILL_MS && stillCount > 20)
+      {
+        pitchOffset = stillPitchSum / stillCount;
+        stage = ST_ADV;
+        advSampleIndex = 0;
+        advLastPrint = 0;
+        advLastStateChange = now;
+        advFootOffGround = false;
+        advMetricMin = 1.0e9f;
+        advMetricMax = -1.0e9f;
+        Serial.println(F("ADV,META,cols=t_ms,raw_pitch,filtpitch,omega,pitch_offset,theta,metric,ref_state"));
+        Serial.printf("ADV,PARAM,OMEGA_WEIGHT,%.4f\n", OMEGA_WEIGHT);
+        Serial.printf("ADV,PARAM,OFF_RANGE_FRACTION,%.4f\n", OFF_RANGE_FRACTION);
+        Serial.printf("ADV,PARAM,ON_RANGE_FRACTION,%.4f\n", OFF_RANGE_FRACTION);
+        Serial.printf("ADV,PARAM,MIN_STATE_TIME_MS,%lu\n", (unsigned long)MIN_STATE_TIME_MS);
+        Serial.printf("ADV,START,pitch_offset=%.2f,walk at different speeds, press a to stop.\n",
+                      pitchOffset);
+      }
+    }
+    else if (stage == ST_ADV)
+    {
+      // Full-rate advanced capture: every sample is logged so the Python
+      // post-processor can recompute theta/metric offline and search for the
+      // best OMEGA_WEIGHT / OFF_RANGE_FRACTION / ON_RANGE_FRACTION /
+      // MIN_STATE_TIME_MS. ref_state is the on-board FSM reference (loaded
+      // with the current constants) for comparison only.
+      const float theta = filteredPitch - pitchOffset;
+      const float metric = fabsf(theta) + OMEGA_WEIGHT * fabsf(omega);
+      advMetricMin = min(advMetricMin, metric);
+      advMetricMax = max(advMetricMax, metric);
+
+      bool refNext = advFootOffGround;
+      if (thresholdsCalibrated)
+      {
+        if (!advFootOffGround && metric >= offThreshold &&
+            now - advLastStateChange >= MIN_STATE_TIME_MS)
+          refNext = true;
+        else if (advFootOffGround && metric <= onThreshold &&
+                 now - advLastStateChange >= MIN_STATE_TIME_MS)
+          refNext = false;
+      }
+      if (refNext != advFootOffGround)
+      {
+        advFootOffGround = refNext;
+        advLastStateChange = now;
+      }
+
+      Serial.printf("ADV,S,%lu,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d\n",
+                    (unsigned long)now, rawPitch, filteredPitch, omega,
+                    pitchOffset, theta, metric,
+                    thresholdsCalibrated ? (advFootOffGround ? 1 : 0) : -1);
+      advSampleIndex++;
+      if (now - advLastPrint >= CAL_STATUS_PERIOD_MS)
+      {
+        advLastPrint = now;
+        Serial.printf("ADV,STAT,samples:%lu,metric=%.2f..%.2f\n",
+                      (unsigned long)advSampleIndex, advMetricMin, advMetricMax);
+      }
+    }
     else if (stage == ST_FSM)
     {
       const float theta = filteredPitch - pitchOffset;
@@ -419,7 +556,7 @@ void setup(void)
     while (true) delay(1000);
   }
   if (imuCalibrated)
-    Serial.println(F("READY,type s = still cal (5s), w = walk cal (8s), f = FSM mode."));
+    Serial.println(F("READY,type s = still cal (5s), w = walk cal (8s), f = FSM mode, a = advanced capture, d = show params."));
   else
     Serial.println(F("READY,IMU calibration required. type i to start."));
   xTaskCreatePinnedToCore(imuTask, "imu_rt", 4096, nullptr, 5, nullptr, 0);
