@@ -24,10 +24,15 @@ static const uint32_t CAL_STATUS_PERIOD_MS = 1000;
 static const int SHANK_AXIS = 0;
 static const int AP_AXIS = 1;
 
-/* Metric = pitch excursion + weighted pitch speed. */
-static const float OMEGA_WEIGHT = 0.15f;
-static const float OFF_RANGE_FRACTION = 0.45f;
-static const float ON_RANGE_FRACTION = 0.4f;
+/* Signed swing metric:  metric = polarity * (theta + OMEGA_WEIGHT * omega).
+   The metric MUST stay signed. fabsf() would make it an even function, which
+   produces two peaks per stride whenever the walking posture differs from the
+   still-calibrated pitch offset, and the FSM then switches twice per step.
+   SWING_POLARITY (+1/-1) is auto-detected while calibrating ('w') or capturing
+   ('a'), so the swing rotation direction never has to be hard-coded. */
+static const float OMEGA_WEIGHT = 0.10f;
+static const float OFF_RANGE_FRACTION = 0.55f;
+static const float ON_RANGE_FRACTION = 0.45f;
 static const uint32_t MIN_STATE_TIME_MS = 60;
 
 /* Mode 'a' (advanced capture): auto pitch-offset calibration window before
@@ -46,6 +51,24 @@ static const uint8_t MOTOR_QUEUE_LEN = 4;
 
 /* BNO055 sensor calibration (accel/gyro/mag) required before use. */
 static bool imuCalibrated = false;
+
+/* +1 when the swing phase rotates theta positive, -1 when it rotates theta
+   negative. Auto-detected from the walk calibration window (polarityFrom). */
+static float swingPolarity = 1.0f;
+
+/* Signed swing metric. theta + w*omega leads theta alone, which detects
+   toe-off earlier; keeping it signed keeps one peak per stride. */
+static float swingMetric(float theta, float omega)
+{
+  return swingPolarity * (theta + OMEGA_WEIGHT * omega);
+}
+
+/* omega*|omega| weights each sample by its own speed, so the sum over a walk
+   window is dominated by the fast swing rotation and its sign is the polarity. */
+static float polarityFrom(float polarityAccum)
+{
+  return (polarityAccum >= 0.0f) ? 1.0f : -1.0f;
+}
 
 static const char *stateName(bool footOffGround)
 {
@@ -215,6 +238,8 @@ void imuTask(void *arg)
   uint32_t lastStateChange = 0;
   uint32_t lastSample = 0;
   uint32_t lastDebug = 0;
+  /* Accumulates omega*|omega| over a walk window to auto-detect swing polarity. */
+  float polarityAccum = 0.0f;
   /* Mode 'a' advanced capture: per-sample raw signals + reference FSM. */
   uint32_t advSampleIndex = 0;
   uint32_t advLastPrint = 0;
@@ -277,6 +302,7 @@ void imuTask(void *arg)
         Serial.printf("PARAM,OFF_RANGE_FRACTION,%.4f\n", OFF_RANGE_FRACTION);
         Serial.printf("PARAM,ON_RANGE_FRACTION,%.4f\n", ON_RANGE_FRACTION);
         Serial.printf("PARAM,MIN_STATE_TIME_MS,%lu\n", (unsigned long)MIN_STATE_TIME_MS);
+        Serial.printf("PARAM,SWING_POLARITY,%d\n", swingPolarity > 0.0f ? 1 : -1);
         Serial.printf("PARAM,PITCH_OFFSET,%.2f\n", pitchOffset);
         Serial.printf("PARAM,ON_THRESHOLD,%.2f\n", onThreshold);
         Serial.printf("PARAM,OFF_THRESHOLD,%.2f\n", offThreshold);
@@ -333,6 +359,7 @@ void imuTask(void *arg)
             stage = ST_WALK;
             walkMetricMin = 1.0e9f;
             walkMetricMax = -1.0e9f;
+            polarityAccum = 0.0f;
             Serial.println(F("CAL,WALK_START,walk naturally for 8 seconds."));
           }
         }
@@ -392,9 +419,12 @@ void imuTask(void *arg)
     else if (stage == ST_WALK)
     {
       const float theta = filteredPitch - pitchOffset;
-      const float metric = fabsf(theta) + OMEGA_WEIGHT * fabsf(omega);
-      walkMetricMin = min(walkMetricMin, metric);
-      walkMetricMax = max(walkMetricMax, metric);
+      polarityAccum += omega * fabsf(omega);
+      // Track the raw signed value s = theta + w*omega. The metric is
+      // polarity*s, so a negative polarity just swaps and negates min/max.
+      const float s = theta + OMEGA_WEIGHT * omega;
+      walkMetricMin = min(walkMetricMin, s);
+      walkMetricMax = max(walkMetricMax, s);
       if (now - lastCalStatus >= CAL_STATUS_PERIOD_MS)
       {
         lastCalStatus = now;
@@ -404,12 +434,18 @@ void imuTask(void *arg)
       }
       if (now - stageStart >= WALK_CAL_MS)
       {
-        const float range = max(1.0f, walkMetricMax - walkMetricMin);
-        offThreshold = walkMetricMin + OFF_RANGE_FRACTION * range;
-        onThreshold = walkMetricMin + ON_RANGE_FRACTION * range;
+        // Detect the swing rotation direction before deriving the thresholds,
+        // so a reversed mounting does not need any constant changed.
+        swingPolarity = polarityFrom(polarityAccum);
+        const float mMin = (swingPolarity > 0.0f) ? walkMetricMin : -walkMetricMax;
+        const float mMax = (swingPolarity > 0.0f) ? walkMetricMax : -walkMetricMin;
+        const float range = max(1.0f, mMax - mMin);
+        offThreshold = mMin + OFF_RANGE_FRACTION * range;
+        onThreshold = mMin + ON_RANGE_FRACTION * range;
         if (onThreshold >= offThreshold) onThreshold = 0.5f * offThreshold;
         thresholdsCalibrated = true;
         stage = ST_IDLE;
+        Serial.printf("CAL,POLARITY,%s\n", swingPolarity > 0.0f ? "POS" : "NEG");
         Serial.printf("CAL,DONE,pitch_offset=%.2f,on=%.2f,off=%.2f\n",
                       pitchOffset, onThreshold, offThreshold);
       }
@@ -437,11 +473,13 @@ void imuTask(void *arg)
         advFootOffGround = false;
         advMetricMin = 1.0e9f;
         advMetricMax = -1.0e9f;
-        Serial.println(F("ADV,META,cols=t_ms,raw_pitch,filtpitch,omega,pitch_offset,theta,metric,ref_state"));
+        polarityAccum = 0.0f;
+        Serial.println(F("ADV,META,cols=t_ms,raw_pitch,filtpitch,omega,pitch_offset,theta,signed_metric,ref_state"));
         Serial.printf("ADV,PARAM,OMEGA_WEIGHT,%.4f\n", OMEGA_WEIGHT);
         Serial.printf("ADV,PARAM,OFF_RANGE_FRACTION,%.4f\n", OFF_RANGE_FRACTION);
-        Serial.printf("ADV,PARAM,ON_RANGE_FRACTION,%.4f\n", OFF_RANGE_FRACTION);
+        Serial.printf("ADV,PARAM,ON_RANGE_FRACTION,%.4f\n", ON_RANGE_FRACTION);
         Serial.printf("ADV,PARAM,MIN_STATE_TIME_MS,%lu\n", (unsigned long)MIN_STATE_TIME_MS);
+        Serial.printf("ADV,PARAM,SWING_POLARITY,%d\n", swingPolarity > 0.0f ? 1 : -1);
         Serial.printf("ADV,START,pitch_offset=%.2f,walk at different speeds, press a to stop.\n",
                       pitchOffset);
       }
@@ -449,12 +487,20 @@ void imuTask(void *arg)
     else if (stage == ST_ADV)
     {
       // Full-rate advanced capture: every sample is logged so the Python
-      // post-processor can recompute theta/metric offline and search for the
+      // post-processor can recompute the metric offline and search for the
       // best OMEGA_WEIGHT / OFF_RANGE_FRACTION / ON_RANGE_FRACTION /
-      // MIN_STATE_TIME_MS. ref_state is the on-board FSM reference (loaded
-      // with the current constants) for comparison only.
+      // MIN_STATE_TIME_MS. The logged metric is theta + w*omega WITHOUT the
+      // polarity factor, so the log stays valid for either mounting direction
+      // and imu_adv_tune.py detects the polarity itself. ref_state is the
+      // on-board FSM reference (current constants) for comparison only.
       const float theta = filteredPitch - pitchOffset;
-      const float metric = fabsf(theta) + OMEGA_WEIGHT * fabsf(omega);
+      const float s = theta + OMEGA_WEIGHT * omega;
+      polarityAccum += omega * fabsf(omega);
+      // Live estimate, used only while no calibrated polarity exists yet. The
+      // reference FSM must use the same polarity its thresholds came from.
+      const float advPolarity = thresholdsCalibrated ? swingPolarity
+                                                     : polarityFrom(polarityAccum);
+      const float metric = advPolarity * s;
       advMetricMin = min(advMetricMin, metric);
       advMetricMax = max(advMetricMax, metric);
 
@@ -476,20 +522,21 @@ void imuTask(void *arg)
 
       Serial.printf("ADV,S,%lu,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d\n",
                     (unsigned long)now, rawPitch, filteredPitch, omega,
-                    pitchOffset, theta, metric,
+                    pitchOffset, theta, s,
                     thresholdsCalibrated ? (advFootOffGround ? 1 : 0) : -1);
       advSampleIndex++;
       if (now - advLastPrint >= CAL_STATUS_PERIOD_MS)
       {
         advLastPrint = now;
-        Serial.printf("ADV,STAT,samples:%lu,metric=%.2f..%.2f\n",
-                      (unsigned long)advSampleIndex, advMetricMin, advMetricMax);
+        Serial.printf("ADV,STAT,samples:%lu,metric=%.2f..%.2f,polarity:%s\n",
+                      (unsigned long)advSampleIndex, advMetricMin, advMetricMax,
+                      advPolarity > 0.0f ? "POS" : "NEG");
       }
     }
     else if (stage == ST_FSM)
     {
       const float theta = filteredPitch - pitchOffset;
-      const float metric = fabsf(theta) + OMEGA_WEIGHT * fabsf(omega);
+      const float metric = swingMetric(theta, omega);
       bool nextState = footOffGround;
       if (!footOffGround && metric >= offThreshold &&
           now - lastStateChange >= MIN_STATE_TIME_MS)
