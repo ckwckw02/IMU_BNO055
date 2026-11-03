@@ -42,8 +42,14 @@ static const uint32_t ADV_STILL_MS = 3000;
 
 Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);
 
+/* Motor commands are HTTP paths. The FSM only triggers a one-shot swing on
+   FOOT_OFF_GROUND; the motor controller ends the motion by itself, so no
+   "stop" path is ever sent. */
+static const char *MOTOR_PATH_ONESHOT_RIGHT = "/oneshot_right";
+static const size_t MOTOR_PATH_MAX = 24;
+
 struct MotorCommand {
-  bool start;
+  char path[MOTOR_PATH_MAX];
 };
 
 static QueueHandle_t motorQueue = nullptr;
@@ -82,10 +88,11 @@ static float wrapAngleDeg(float angle)
   return angle;
 }
 
-static void queueMotorCommand(bool start)
+static void queueMotorCommand(const char *path)
 {
   if (motorQueue == nullptr) return;
-  MotorCommand command = {start};
+  MotorCommand command;
+  snprintf(command.path, sizeof(command.path), "%s", path);
   xQueueSend(motorQueue, &command, 0);
 }
 
@@ -187,8 +194,7 @@ static bool motorHttpGet(const char *path)
   String statusLine = client.readStringUntil('\n');
   client.stop();
   statusLine.trim();
-  Serial.printf("MOTOR,%s,%s\n",
-                strcmp(path, "/start") == 0 ? "START" : "STOP",
+  Serial.printf("MOTOR,%s,%s\n", path,
                 statusLine.length() ? statusLine.c_str() : "NO_RESPONSE");
   return statusLine.startsWith("HTTP/1.1 2") || statusLine.startsWith("HTTP/1.0 2");
 }
@@ -200,7 +206,7 @@ void motorTask(void *arg)
   for (;;)
   {
     if (xQueueReceive(motorQueue, &command, portMAX_DELAY) == pdTRUE)
-      motorHttpGet(command.start ? "/start" : "/stop");
+      motorHttpGet(command.path);
   }
 }
 
@@ -285,12 +291,9 @@ void imuTask(void *arg)
       const char c = (char)Serial.read();
       if (c == 'i')
       {
-        // Stop the motor if the FSM left it running before calibration.
-        if (footOffGround)
-        {
-          footOffGround = false;
-          queueMotorCommand(false);
-        }
+        // Reset the FSM state if it was running before calibration. The motor
+        // one-shot finishes on its own, so nothing has to be sent to stop it.
+        footOffGround = false;
         stage = ST_IMU_CAL;
         stageStart = now;
         lastCalStatus = now;
@@ -373,7 +376,6 @@ void imuTask(void *arg)
             footOffGround = false;
             lastStateChange = now;
             Serial.println(F("FSM,FOOT_ON_GROUND,STARTED"));
-            queueMotorCommand(false);
           }
         }
       }
@@ -474,7 +476,7 @@ void imuTask(void *arg)
         advMetricMin = 1.0e9f;
         advMetricMax = -1.0e9f;
         polarityAccum = 0.0f;
-        Serial.println(F("ADV,META,cols=t_ms,raw_pitch,filtpitch,omega,pitch_offset,theta,signed_metric,ref_state"));
+        Serial.println(F("ADV,META,cols=t_ms,raw_pitch,filtpitch,omega,pitch_offset,thetxa,signed_metric,ref_state"));
         Serial.printf("ADV,PARAM,OMEGA_WEIGHT,%.4f\n", OMEGA_WEIGHT);
         Serial.printf("ADV,PARAM,OFF_RANGE_FRACTION,%.4f\n", OFF_RANGE_FRACTION);
         Serial.printf("ADV,PARAM,ON_RANGE_FRACTION,%.4f\n", ON_RANGE_FRACTION);
@@ -551,7 +553,9 @@ void imuTask(void *arg)
         lastStateChange = now;
         Serial.printf("FSM,%s,theta=%.2f,omega=%.2f,metric=%.2f\n",
                       stateName(footOffGround), theta, omega, metric);
-        queueMotorCommand(footOffGround);
+        /* Trigger the one-shot swing on toe-off only. FOOT_ON_GROUND needs no
+           command because the one-shot motion stops by itself. */
+        if (footOffGround) queueMotorCommand(MOTOR_PATH_ONESHOT_RIGHT);
       }
       if (now - lastDebug >= 100)
       {
