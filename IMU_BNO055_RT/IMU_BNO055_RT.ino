@@ -170,6 +170,37 @@ static bool hasImuCalibration()
   return storedBnoID == (long)sensor.sensor_id && n == sizeof(calibData);
 }
 
+/* Dump every value stored in Preferences (namespace "bno055") plus the live
+   BNO055 calibration level, for the 'd' command. */
+static void dumpStoredCalibration()
+{
+  Preferences prefs;
+  sensor_t sensor;
+  bno.getSensor(&sensor);
+  prefs.begin("bno055", true);
+
+  if (prefs.isKey("bnoID"))
+  {
+    const long storedBnoID = prefs.getLong("bnoID", 0);
+    Serial.printf("PREF,bno055,bnoID,%ld,matching:%s\n",
+                  storedBnoID, storedBnoID == (long)sensor.sensor_id ? "YES" : "NO");
+  }
+  else Serial.println(F("PREF,bno055,bnoID,MISSING"));
+
+  if (prefs.isKey("calibData"))
+  {
+    adafruit_bno055_offsets_t calibData;
+    const size_t n = prefs.getBytes("calibData", &calibData, sizeof(calibData));
+    if (n == sizeof(calibData)) printCalibOffsets("PREF", calibData);
+    else Serial.printf("PREF,bno055,calibData,SIZE_MISMATCH,%u/%u\n",
+                       (unsigned)n, (unsigned)sizeof(calibData));
+  }
+  else Serial.println(F("PREF,bno055,calibData,MISSING"));
+
+  prefs.end();
+  printImuCalStatus();
+}
+
 static bool motorHttpGet(const char *path)
 {
   if (WiFi.status() != WL_CONNECTED)
@@ -309,6 +340,7 @@ void imuTask(void *arg)
         Serial.printf("PARAM,PITCH_OFFSET,%.2f\n", pitchOffset);
         Serial.printf("PARAM,ON_THRESHOLD,%.2f\n", onThreshold);
         Serial.printf("PARAM,OFF_THRESHOLD,%.2f\n", offThreshold);
+        dumpStoredCalibration();
       }
       else if (c == 'a')
       {
