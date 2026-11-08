@@ -1,9 +1,11 @@
 #include <Wire.h>
 #include <WiFi.h>
+#include <WebServer.h>
 #include <Preferences.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
 #include <utility/imumaths.h>
+#include "webpage.h"
 
 #define SDA_PIN D4
 #define SCL_PIN D5
@@ -15,6 +17,7 @@ static const char *WIFI_PASSWORD = "12345678";
 static const char *MOTOR_HOST = "192.168.4.1";
 static const uint16_t MOTOR_PORT = 80;
 static const uint32_t MOTOR_HTTP_TIMEOUT_MS = 300;
+static const char *DEVICE_HOSTNAME = "RIMU";
 
 static const uint32_t STILL_CAL_MS = 5000;
 static const uint32_t WALK_CAL_MS = 8000;
@@ -54,6 +57,95 @@ struct MotorCommand {
 
 static QueueHandle_t motorQueue = nullptr;
 static const uint8_t MOTOR_QUEUE_LEN = 4;
+static QueueHandle_t webCommandQueue = nullptr;
+static WebServer webServer(80);
+
+struct WebTelemetry {
+  float rawPitch;
+  float filteredPitch;
+  float omega;
+  bool footOffGround;
+};
+
+static volatile WebTelemetry webTelemetry = {0.0f, 0.0f, 0.0f, false};
+static volatile float webPitchOffset = 0.0f;
+static volatile float webOnThreshold = 0.0f;
+static volatile float webOffThreshold = 0.0f;
+
+/* Status log for the webpage: every line that webLog() prints to the serial
+   port is also kept in this small ring buffer, so the browser can show the
+   same status the serial monitor shows. Only the 1 Hz status/event lines are
+   logged; the high-rate FSM debug and ADV sample lines stay serial-only. */
+static const uint8_t WEB_LOG_LINES = 12;
+static const uint8_t WEB_LOG_LEN = 128;
+static char webLogBuf[WEB_LOG_LINES][WEB_LOG_LEN];
+static uint8_t webLogHead = 0;
+static uint8_t webLogCount = 0;
+static SemaphoreHandle_t webLogMutex = nullptr;
+
+/* Mirrors the imuTask Stage enum, in the same order, for the status page. */
+static volatile uint8_t webStageId = 0;
+static const char *const WEB_STAGE_NAMES[] = {
+  "IDLE", "IMU_CAL", "STILL", "WALK", "FSM", "ADV_CAL", "ADV"
+};
+static const uint8_t WEB_STAGE_COUNT =
+  sizeof(WEB_STAGE_NAMES) / sizeof(WEB_STAGE_NAMES[0]);
+
+static void webLogPush(const char *line)
+{
+  const bool locked = (webLogMutex != nullptr &&
+                       xSemaphoreTake(webLogMutex, pdMS_TO_TICKS(20)) == pdTRUE);
+  snprintf(webLogBuf[webLogHead], WEB_LOG_LEN, "%s", line);
+  webLogHead = (uint8_t)((webLogHead + 1) % WEB_LOG_LINES);
+  if (webLogCount < WEB_LOG_LINES) webLogCount++;
+  if (locked) xSemaphoreGive(webLogMutex);
+}
+
+/* Print a status line to the serial port and keep it for the webpage. */
+static void webLog(const char *fmt, ...)
+            __attribute__((format(printf, 1, 2)));
+
+static void webLog(const char *fmt, ...)
+{
+  char line[WEB_LOG_LEN];
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(line, sizeof(line), fmt, args);
+  va_end(args);
+  Serial.println(line);
+  webLogPush(line);
+}
+
+static void jsonAppendEscaped(String &out, const char *s)
+{
+  for (; *s; s++)
+  {
+    const unsigned char c = (unsigned char)*s;
+    if (c == '"' || c == '\\') { out += '\\'; out += (char)c; }
+    else if (c < 0x20u) out += ' ';
+    else out += (char)c;
+  }
+}
+
+/* Append the log as a JSON array of strings, oldest entry first. */
+static void appendWebLogJson(String &json)
+{
+  json += ",\"log\":[";
+  const bool locked = (webLogMutex != nullptr &&
+                       xSemaphoreTake(webLogMutex, pdMS_TO_TICKS(20)) == pdTRUE);
+  const uint8_t head = webLogHead;
+  const uint8_t count = webLogCount;
+  for (uint8_t i = 0; i < count; i++)
+  {
+    const uint8_t idx = (uint8_t)((head - count + i + 2 * WEB_LOG_LINES) % WEB_LOG_LINES);
+    if (i) json += ',';
+    json += '"';
+    jsonAppendEscaped(json, webLogBuf[idx]);
+    json += '"';
+  }
+  if (locked) xSemaphoreGive(webLogMutex);
+  json += ']';
+}
 
 /* BNO055 sensor calibration (accel/gyro/mag) required before use. */
 static bool imuCalibrated = false;
@@ -125,12 +217,12 @@ static void loadCalibrationOffsets()
     {
       bno.setSensorOffsets(calibData);
       imuCalibrated = true;
-      Serial.println(F("BNO055 calibration loaded."));
+      webLog("BNO055 calibration loaded.");
       printCalibOffsets("LOAD", calibData);
     }
-    else Serial.println(F("Warning: calibration data missing."));
+    else webLog("Warning: calibration data missing.");
   }
-  else Serial.println(F("Warning: no matching BNO055 calibration."));
+  else webLog("Warning: no matching BNO055 calibration.");
   prefs.end();
 }
 
@@ -145,7 +237,7 @@ static void saveCalibrationOffsets()
   prefs.putLong("bnoID", (long)sensor.sensor_id);
   prefs.putBytes("calibData", &calibData, sizeof(calibData));
   prefs.end();
-  Serial.println(F("BNO055 calibration saved."));
+  webLog("BNO055 calibration saved.");
   printCalibOffsets("SAVE", calibData);
 }
 
@@ -153,8 +245,7 @@ static void printImuCalStatus()
 {
   uint8_t system, gyro, accel, mag;
   bno.getCalibration(&system, &gyro, &accel, &mag);
-  Serial.printf("CAL,IMU,SYS:%d,G:%d,A:%d,M:%d\n",
-                system, gyro, accel, mag);
+  webLog("CAL,IMU,SYS:%d,G:%d,A:%d,M:%d", system, gyro, accel, mag);
 }
 
 static bool hasImuCalibration()
@@ -168,6 +259,91 @@ static bool hasImuCalibration()
   const size_t n = prefs.getBytes("calibData", &calibData, sizeof(calibData));
   prefs.end();
   return storedBnoID == (long)sensor.sensor_id && n == sizeof(calibData);
+}
+
+static void handleWebCommand()
+{
+  if (!webServer.hasArg("c") || webServer.arg("c").length() != 1)
+  {
+    webServer.send(400, "application/json",
+                   "{\"error\":\"missing command\"}");
+    return;
+  }
+
+  const char command = webServer.arg("c")[0];
+  if (command != 'i' && command != 's' && command != 'w' &&
+      command != 'f' && command != 'd')
+  {
+    webServer.send(400, "application/json",
+                   "{\"error\":\"unsupported command\"}");
+    return;
+  }
+
+  if (webCommandQueue == nullptr ||
+      xQueueSend(webCommandQueue, &command, 0) != pdTRUE)
+  {
+    webServer.send(503, "application/json",
+                   "{\"error\":\"command queue full\"}");
+    return;
+  }
+  webServer.send(200, "application/json", "{\"message\":\"command sent\"}");
+}
+
+static void handleWebStatus()
+{
+  const bool connected = WiFi.status() == WL_CONNECTED;
+  String json = "{\"connected\":";
+  json += connected ? "true" : "false";
+  json += ",\"wifi\":\"";
+  json += connected ? "connected" : "disconnected";
+  json += "\",\"ip\":\"";
+  json += connected ? WiFi.localIP().toString() : "";
+  json += "\",\"hostname\":\"http://RIMU.local/\"";
+  json += ",\"rawPitch\":" + String(webTelemetry.rawPitch, 2);
+  json += ",\"filteredPitch\":" + String(webTelemetry.filteredPitch, 2);
+  json += ",\"omega\":" + String(webTelemetry.omega, 2);
+  json += ",\"footOffGround\":";
+  json += webTelemetry.footOffGround ? "true" : "false";
+  const uint8_t stageId = webStageId;
+  json += ",\"mode\":\"";
+  json += stageId < WEB_STAGE_COUNT ? WEB_STAGE_NAMES[stageId] : "?";
+  json += "\"";
+  appendWebLogJson(json);
+  json += "}";
+  webServer.send(200, "application/json", json);
+}
+
+static void handleWebParams()
+{
+  uint8_t system, gyro, accel, mag;
+  bno.getCalibration(&system, &gyro, &accel, &mag);
+  String json = "{\"OMEGA_WEIGHT\":" + String(OMEGA_WEIGHT, 4);
+  json += ",\"OFF_RANGE_FRACTION\":" + String(OFF_RANGE_FRACTION, 4);
+  json += ",\"ON_RANGE_FRACTION\":" + String(ON_RANGE_FRACTION, 4);
+  json += ",\"MIN_STATE_TIME_MS\":" + String(MIN_STATE_TIME_MS);
+  json += ",\"SWING_POLARITY\":";
+  json += swingPolarity > 0.0f ? "1" : "-1";
+  json += ",\"imuCalibrated\":";
+  json += imuCalibrated ? "true" : "false";
+  json += ",\"pitchOffset\":" + String(webPitchOffset, 2);
+  json += ",\"onThreshold\":" + String(webOnThreshold, 2);
+  json += ",\"offThreshold\":" + String(webOffThreshold, 2);
+  json += ",\"calibration\":{\"system\":" + String(system);
+  json += ",\"gyro\":" + String(gyro) + ",\"accel\":" + String(accel);
+  json += ",\"mag\":" + String(mag) + "}}";
+  webServer.send(200, "application/json", json);
+}
+
+static void startWebServer()
+{
+  webServer.on("/", HTTP_GET, []() {
+    webServer.send_P(200, "text/html", WEBPAGE_HTML);
+  });
+  webServer.on("/api/command", HTTP_GET, handleWebCommand);
+  webServer.on("/api/status", HTTP_GET, handleWebStatus);
+  webServer.on("/api/params", HTTP_GET, handleWebParams);
+  webServer.begin();
+  webLog("WEB,READY,http://RIMU.local/");
 }
 
 /* Dump every value stored in Preferences (namespace "bno055") plus the live
@@ -205,7 +381,7 @@ static bool motorHttpGet(const char *path)
 {
   if (WiFi.status() != WL_CONNECTED)
   {
-    Serial.printf("MOTOR,ERROR,WIFI_DISCONNECTED,%s\n", path);
+    webLog("MOTOR,ERROR,WIFI_DISCONNECTED,%s", path);
     return false;
   }
 
@@ -213,7 +389,7 @@ static bool motorHttpGet(const char *path)
   client.setTimeout(MOTOR_HTTP_TIMEOUT_MS);
   if (!client.connect(MOTOR_HOST, MOTOR_PORT))
   {
-    Serial.printf("MOTOR,ERROR,CONNECT_FAILED,%s\n", path);
+    webLog("MOTOR,ERROR,CONNECT_FAILED,%s", path);
     return false;
   }
   client.printf("GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n",
@@ -225,8 +401,8 @@ static bool motorHttpGet(const char *path)
   String statusLine = client.readStringUntil('\n');
   client.stop();
   statusLine.trim();
-  Serial.printf("MOTOR,%s,%s\n", path,
-                statusLine.length() ? statusLine.c_str() : "NO_RESPONSE");
+  webLog("MOTOR,%s,%s", path,
+         statusLine.length() ? statusLine.c_str() : "NO_RESPONSE");
   return statusLine.startsWith("HTTP/1.1 2") || statusLine.startsWith("HTTP/1.0 2");
 }
 
@@ -313,13 +489,22 @@ void imuTask(void *arg)
     filteredPitch += 0.20f * (unwrappedPitch - filteredPitch);
     const float omega = (filteredPitch - previousPitch) / dt;
     previousPitch = filteredPitch;
+    webTelemetry.rawPitch = rawPitch;
+    webTelemetry.filteredPitch = filteredPitch;
+    webTelemetry.omega = omega;
+    webTelemetry.footOffGround = footOffGround;
 
     // Serial commands: i = IMU calibration, s = still calibration,
     // w = walk calibration, f = FSM mode, a = advanced capture (tuning log),
     // d = dump current FSM parameters.
-    while (Serial.available())
+    while (Serial.available() || (webCommandQueue != nullptr &&
+                                  uxQueueMessagesWaiting(webCommandQueue) > 0))
     {
-      const char c = (char)Serial.read();
+      char c;
+      if (Serial.available())
+        c = (char)Serial.read();
+      else if (xQueueReceive(webCommandQueue, &c, 0) != pdTRUE)
+        break;
       if (c == 'i')
       {
         // Reset the FSM state if it was running before calibration. The motor
@@ -328,7 +513,7 @@ void imuTask(void *arg)
         stage = ST_IMU_CAL;
         stageStart = now;
         lastCalStatus = now;
-        Serial.println(F("CAL,IMU_START,stand still then draw figure 8 with the sensor."));
+        webLog("CAL,IMU_START,stand still then draw figure 8 with the sensor.");
       }
       else if (c == 'd')
       {
@@ -350,12 +535,12 @@ void imuTask(void *arg)
           // The auto pitch offset taken here is capture-specific; do not let
           // the FSM reuse it without a fresh still calibration.
           thresholdsCalibrated = false;
-          Serial.printf("ADV,STOP,samples:%lu,metric=%.2f..%.2f\n",
-                        (unsigned long)advSampleIndex, advMetricMin, advMetricMax);
+          webLog("ADV,STOP,samples:%lu,metric=%.2f..%.2f",
+                 (unsigned long)advSampleIndex, advMetricMin, advMetricMax);
         }
         else if (!imuCalibrated)
         {
-          Serial.println(F("REJECTED,run IMU calibration first (i)."));
+          webLog("REJECTED,run IMU calibration first (i).");
         }
         else
         {
@@ -364,14 +549,14 @@ void imuTask(void *arg)
           lastCalStatus = now;
           stillPitchSum = 0.0f;
           stillCount = 0;
-          Serial.println(F("ADV,STILL_START,stand still for 3 seconds."));
+          webLog("ADV,STILL_START,stand still for 3 seconds.");
         }
       }
       else if (c == 's' || c == 'w' || c == 'f')
       {
         if (!imuCalibrated)
         {
-          Serial.println(F("REJECTED,run IMU calibration first (i)."));
+          webLog("REJECTED,run IMU calibration first (i).");
           continue;
         }
         stageStart = now;
@@ -383,34 +568,40 @@ void imuTask(void *arg)
           stillCount = 0;
           pitchCalibrated = false;
           thresholdsCalibrated = false;
-          Serial.println(F("CAL,STILL_START,stand still for 5 seconds."));
+          webLog("CAL,STILL_START,stand still for 5 seconds.");
         }
         else if (c == 'w')
         {
           if (!pitchCalibrated)
-            Serial.println(F("CAL,WALK_REJECTED,run still calibration first (s)."));
+            webLog("CAL,WALK_REJECTED,run still calibration first (s).");
           else
           {
             stage = ST_WALK;
             walkMetricMin = 1.0e9f;
             walkMetricMax = -1.0e9f;
             polarityAccum = 0.0f;
-            Serial.println(F("CAL,WALK_START,walk naturally for 8 seconds."));
+            webLog("CAL,WALK_START,walk naturally for 8 seconds.");
           }
         }
         else if (c == 'f')
         {
           if (!pitchCalibrated || !thresholdsCalibrated)
-            Serial.println(F("FSM,REJECTED,calibrate first: s then w."));
+            webLog("FSM,REJECTED,calibrate first: s then w.");
           else
           {
             stage = ST_FSM;
             footOffGround = false;
             lastStateChange = now;
-            Serial.println(F("FSM,FOOT_ON_GROUND,STARTED"));
+            webLog("FSM,FOOT_ON_GROUND,STARTED");
           }
         }
       }
+    }
+
+    if (webStageId != (uint8_t)stage)
+    {
+      webStageId = (uint8_t)stage;
+      webTelemetry.footOffGround = footOffGround;
     }
 
     if (stage == ST_IMU_CAL)
@@ -428,7 +619,7 @@ void imuTask(void *arg)
         imuCalibrated = true;
         stage = ST_IDLE;
         footOffGround = false;
-        Serial.println(F("CAL,IMU_DONE,calibration saved to Preferences."));
+        webLog("CAL,IMU_DONE,calibration saved to Preferences.");
       }
     }
     else if (stage == ST_STILL)
@@ -438,16 +629,17 @@ void imuTask(void *arg)
       if (now - lastCalStatus >= CAL_STATUS_PERIOD_MS)
       {
         lastCalStatus = now;
-        Serial.printf("CAL,STILL,%lu/%lu ms\n",
-                      (unsigned long)(now - stageStart),
-                      (unsigned long)STILL_CAL_MS);
+        webLog("CAL,STILL,%lu/%lu ms",
+               (unsigned long)(now - stageStart),
+               (unsigned long)STILL_CAL_MS);
       }
       if (now - stageStart >= STILL_CAL_MS && stillCount > 20)
       {
         pitchOffset = stillPitchSum / stillCount;
+        webPitchOffset = pitchOffset;
         pitchCalibrated = true;
         stage = ST_IDLE;
-        Serial.printf("CAL,STILL_DONE,pitch_offset=%.2f\n", pitchOffset);
+        webLog("CAL,STILL_DONE,pitch_offset=%.2f", pitchOffset);
       }
     }
     else if (stage == ST_WALK)
@@ -462,9 +654,9 @@ void imuTask(void *arg)
       if (now - lastCalStatus >= CAL_STATUS_PERIOD_MS)
       {
         lastCalStatus = now;
-        Serial.printf("CAL,WALK,%lu/%lu ms,range=%.2f..%.2f\n",
-                      (unsigned long)(now - stageStart),
-                      (unsigned long)WALK_CAL_MS, walkMetricMin, walkMetricMax);
+        webLog("CAL,WALK,%lu/%lu ms,range=%.2f..%.2f",
+               (unsigned long)(now - stageStart),
+               (unsigned long)WALK_CAL_MS, walkMetricMin, walkMetricMax);
       }
       if (now - stageStart >= WALK_CAL_MS)
       {
@@ -477,11 +669,13 @@ void imuTask(void *arg)
         offThreshold = mMin + OFF_RANGE_FRACTION * range;
         onThreshold = mMin + ON_RANGE_FRACTION * range;
         if (onThreshold >= offThreshold) onThreshold = 0.5f * offThreshold;
+        webOnThreshold = onThreshold;
+        webOffThreshold = offThreshold;
         thresholdsCalibrated = true;
         stage = ST_IDLE;
-        Serial.printf("CAL,POLARITY,%s\n", swingPolarity > 0.0f ? "POS" : "NEG");
-        Serial.printf("CAL,DONE,pitch_offset=%.2f,on=%.2f,off=%.2f\n",
-                      pitchOffset, onThreshold, offThreshold);
+        webLog("CAL,POLARITY,%s", swingPolarity > 0.0f ? "POS" : "NEG");
+        webLog("CAL,DONE,pitch_offset=%.2f,on=%.2f,off=%.2f",
+               pitchOffset, onThreshold, offThreshold);
       }
     }
     else if (stage == ST_ADV_CAL)
@@ -493,13 +687,14 @@ void imuTask(void *arg)
       if (now - lastCalStatus >= CAL_STATUS_PERIOD_MS)
       {
         lastCalStatus = now;
-        Serial.printf("ADV,STILL,%lu/%lu ms\n",
-                      (unsigned long)(now - stageStart),
-                      (unsigned long)ADV_STILL_MS);
+        webLog("ADV,STILL,%lu/%lu ms",
+               (unsigned long)(now - stageStart),
+               (unsigned long)ADV_STILL_MS);
       }
       if (now - stageStart >= ADV_STILL_MS && stillCount > 20)
       {
         pitchOffset = stillPitchSum / stillCount;
+        webPitchOffset = pitchOffset;
         stage = ST_ADV;
         advSampleIndex = 0;
         advLastPrint = 0;
@@ -514,8 +709,8 @@ void imuTask(void *arg)
         Serial.printf("ADV,PARAM,ON_RANGE_FRACTION,%.4f\n", ON_RANGE_FRACTION);
         Serial.printf("ADV,PARAM,MIN_STATE_TIME_MS,%lu\n", (unsigned long)MIN_STATE_TIME_MS);
         Serial.printf("ADV,PARAM,SWING_POLARITY,%d\n", swingPolarity > 0.0f ? 1 : -1);
-        Serial.printf("ADV,START,pitch_offset=%.2f,walk at different speeds, press a to stop.\n",
-                      pitchOffset);
+        webLog("ADV,START,pitch_offset=%.2f,walk at different speeds, press a to stop.",
+               pitchOffset);
       }
     }
     else if (stage == ST_ADV)
@@ -562,9 +757,9 @@ void imuTask(void *arg)
       if (now - advLastPrint >= CAL_STATUS_PERIOD_MS)
       {
         advLastPrint = now;
-        Serial.printf("ADV,STAT,samples:%lu,metric=%.2f..%.2f,polarity:%s\n",
-                      (unsigned long)advSampleIndex, advMetricMin, advMetricMax,
-                      advPolarity > 0.0f ? "POS" : "NEG");
+        webLog("ADV,STAT,samples:%lu,metric=%.2f..%.2f,polarity:%s",
+               (unsigned long)advSampleIndex, advMetricMin, advMetricMax,
+               advPolarity > 0.0f ? "POS" : "NEG");
       }
     }
     else if (stage == ST_FSM)
@@ -582,9 +777,10 @@ void imuTask(void *arg)
       if (nextState != footOffGround)
       {
         footOffGround = nextState;
+        webTelemetry.footOffGround = footOffGround;
         lastStateChange = now;
-        Serial.printf("FSM,%s,theta=%.2f,omega=%.2f,metric=%.2f\n",
-                      stateName(footOffGround), theta, omega, metric);
+        webLog("FSM,%s,theta=%.2f,omega=%.2f,metric=%.2f",
+               stateName(footOffGround), theta, omega, metric);
         /* Trigger the one-shot swing on toe-off only. FOOT_ON_GROUND needs no
            command because the one-shot motion stops by itself. */
         if (footOffGround) queueMotorCommand(MOTOR_PATH_ONESHOT_RIGHT);
@@ -592,6 +788,7 @@ void imuTask(void *arg)
       if (now - lastDebug >= 100)
       {
         lastDebug = now;
+        webTelemetry.footOffGround = footOffGround;
         Serial.printf("FSM,%s,theta=%.2f,omega=%.2f,metric=%.2f\n",
                       stateName(footOffGround), theta, omega, metric);
       }
@@ -604,6 +801,7 @@ void setup(void)
 {
   Serial.begin(SERIAL_BAUD);
   while (!Serial) delay(10);
+  webLogMutex = xSemaphoreCreateMutex();
   Wire.begin(SDA_PIN, SCL_PIN);
   Wire.setClock(400000UL);
   if (!bno.begin(OPERATION_MODE_IMUPLUS))
@@ -615,10 +813,11 @@ void setup(void)
   if (hasImuCalibration())
     loadCalibrationOffsets();
   else
-    Serial.println(F("CAL,IMU_REQUIRED,no calibration data in Preferences."));
+    webLog("CAL,IMU_REQUIRED,no calibration data in Preferences.");
 
-  Serial.printf("WIFI,CONNECTING,%s\n", WIFI_SSID);
+  webLog("WIFI,CONNECTING,%s", WIFI_SSID);
   WiFi.mode(WIFI_STA);
+  WiFi.setHostname(DEVICE_HOSTNAME);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   const uint32_t wifiDeadline = millis() + 15000;
   while (WiFi.status() != WL_CONNECTED && millis() < wifiDeadline)
@@ -628,9 +827,17 @@ void setup(void)
   }
   Serial.println();
   if (WiFi.status() == WL_CONNECTED)
-    Serial.printf("WIFI,CONNECTED,%s\n", WiFi.localIP().toString().c_str());
+    webLog("WIFI,CONNECTED,%s", WiFi.localIP().toString().c_str());
   else
-    Serial.println(F("WIFI,ERROR,CONNECTION_TIMEOUT"));
+    webLog("WIFI,ERROR,CONNECTION_TIMEOUT");
+
+  webCommandQueue = xQueueCreate(8, sizeof(char));
+  if (webCommandQueue == nullptr)
+  {
+    Serial.println(F("ERROR,WEB_COMMAND_QUEUE_CREATE_FAILED"));
+    while (true) delay(1000);
+  }
+  startWebServer();
 
   motorQueue = xQueueCreate(MOTOR_QUEUE_LEN, sizeof(MotorCommand));
   if (motorQueue == nullptr)
@@ -639,14 +846,15 @@ void setup(void)
     while (true) delay(1000);
   }
   if (imuCalibrated)
-    Serial.println(F("READY,type s = still cal (5s), w = walk cal (8s), f = FSM mode, a = advanced capture, d = show params."));
+    webLog("READY,type s = still cal (5s), w = walk cal (8s), f = FSM mode, a = advanced capture, d = show params.");
   else
-    Serial.println(F("READY,IMU calibration required. type i to start."));
+    webLog("READY,IMU calibration required. type i to start.");
   xTaskCreatePinnedToCore(imuTask, "imu_rt", 4096, nullptr, 5, nullptr, 0);
   xTaskCreatePinnedToCore(motorTask, "motor_http", 4096, nullptr, 3, nullptr, 0);
 }
 
 void loop(void)
 {
-  vTaskDelay(pdMS_TO_TICKS(1000));
+  webServer.handleClient();
+  vTaskDelay(pdMS_TO_TICKS(10));
 }
