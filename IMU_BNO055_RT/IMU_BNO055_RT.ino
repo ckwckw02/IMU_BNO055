@@ -10,6 +10,19 @@
 #define SDA_PIN D4
 #define SCL_PIN D5
 
+/* Build-time leg selection: set LEG_SIDE to LEG_SIDE_RIGHT or LEG_SIDE_LEFT.
+   Everything that differs between the two legs (reported leg name, mDNS
+   hostname, motor one-shot path) is derived from this one define, so the same
+   source can be flashed to either shank. The sensor axes and the pitch
+   direction are identical on both legs, so the FSM logic needs no change. */
+#define LEG_SIDE_RIGHT 1
+#define LEG_SIDE_LEFT  0
+#define LEG_SIDE       LEG_SIDE_RIGHT
+
+#if (LEG_SIDE != LEG_SIDE_RIGHT) && (LEG_SIDE != LEG_SIDE_LEFT)
+#error "LEG_SIDE must be LEG_SIDE_RIGHT or LEG_SIDE_LEFT"
+#endif
+
 static const uint32_t SAMPLE_PERIOD_MS = 10;
 static const uint32_t SERIAL_BAUD = 115200;
 static const char *WIFI_SSID = "MotorControl";
@@ -17,13 +30,22 @@ static const char *WIFI_PASSWORD = "12345678";
 static const char *MOTOR_HOST = "192.168.4.1";
 static const uint16_t MOTOR_PORT = 80;
 static const uint32_t MOTOR_HTTP_TIMEOUT_MS = 300;
+
+/* Leg-dependent identifiers, all derived from LEG_SIDE. The hostname differs
+   per leg so both units can be on the network at the same time. */
+#if (LEG_SIDE == LEG_SIDE_RIGHT)
 static const char *DEVICE_HOSTNAME = "RIMU";
+static const char *LEG_NAME = "RIGHT";
+#else
+static const char *DEVICE_HOSTNAME = "LIMU";
+static const char *LEG_NAME = "LEFT";
+#endif
 
 static const uint32_t STILL_CAL_MS = 5000;
 static const uint32_t WALK_CAL_MS = 8000;
 static const uint32_t CAL_STATUS_PERIOD_MS = 1000;
 
-/* Right-shank mounting: X is along the shank, Y is forward/back. */
+/* Shank mounting (same on both legs): X is along the shank, Y is forward/back. */
 static const int SHANK_AXIS = 0;
 static const int AP_AXIS = 1;
 
@@ -47,8 +69,12 @@ Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);
 
 /* Motor commands are HTTP paths. The FSM only triggers a one-shot swing on
    FOOT_OFF_GROUND; the motor controller ends the motion by itself, so no
-   "stop" path is ever sent. */
-static const char *MOTOR_PATH_ONESHOT_RIGHT = "/oneshot_right";
+   "stop" path is ever sent. The path follows the leg selected by LEG_SIDE. */
+#if (LEG_SIDE == LEG_SIDE_RIGHT)
+static const char *MOTOR_PATH_ONESHOT = "/oneshot_right";
+#else
+static const char *MOTOR_PATH_ONESHOT = "/oneshot_left";
+#endif
 static const size_t MOTOR_PATH_MAX = 24;
 
 struct MotorCommand {
@@ -298,7 +324,14 @@ static void handleWebStatus()
   json += connected ? "connected" : "disconnected";
   json += "\",\"ip\":\"";
   json += connected ? WiFi.localIP().toString() : "";
-  json += "\",\"hostname\":\"http://RIMU.local/\"";
+  json += "\",\"hostname\":\"http://";
+  json += DEVICE_HOSTNAME;
+  json += ".local/\"";
+  json += ",\"leg\":\"";
+  json += LEG_NAME;
+  json += "\",\"device\":\"";
+  json += DEVICE_HOSTNAME;
+  json += "\"";
   json += ",\"rawPitch\":" + String(webTelemetry.rawPitch, 2);
   json += ",\"filteredPitch\":" + String(webTelemetry.filteredPitch, 2);
   json += ",\"omega\":" + String(webTelemetry.omega, 2);
@@ -317,7 +350,9 @@ static void handleWebParams()
 {
   uint8_t system, gyro, accel, mag;
   bno.getCalibration(&system, &gyro, &accel, &mag);
-  String json = "{\"OMEGA_WEIGHT\":" + String(OMEGA_WEIGHT, 4);
+  String json = "{\"LEG\":\"";
+  json += LEG_NAME;
+  json += "\",\"OMEGA_WEIGHT\":" + String(OMEGA_WEIGHT, 4);
   json += ",\"OFF_RANGE_FRACTION\":" + String(OFF_RANGE_FRACTION, 4);
   json += ",\"ON_RANGE_FRACTION\":" + String(ON_RANGE_FRACTION, 4);
   json += ",\"MIN_STATE_TIME_MS\":" + String(MIN_STATE_TIME_MS);
@@ -343,7 +378,7 @@ static void startWebServer()
   webServer.on("/api/status", HTTP_GET, handleWebStatus);
   webServer.on("/api/params", HTTP_GET, handleWebParams);
   webServer.begin();
-  webLog("WEB,READY,http://RIMU.local/");
+  webLog("WEB,READY,leg=%s,http://%s.local/", LEG_NAME, DEVICE_HOSTNAME);
 }
 
 /* Dump every value stored in Preferences (namespace "bno055") plus the live
@@ -517,6 +552,7 @@ void imuTask(void *arg)
       }
       else if (c == 'd')
       {
+        Serial.printf("PARAM,LEG,%s\n", LEG_NAME);
         Serial.printf("PARAM,OMEGA_WEIGHT,%.4f\n", OMEGA_WEIGHT);
         Serial.printf("PARAM,OFF_RANGE_FRACTION,%.4f\n", OFF_RANGE_FRACTION);
         Serial.printf("PARAM,ON_RANGE_FRACTION,%.4f\n", ON_RANGE_FRACTION);
@@ -783,7 +819,7 @@ void imuTask(void *arg)
                stateName(footOffGround), theta, omega, metric);
         /* Trigger the one-shot swing on toe-off only. FOOT_ON_GROUND needs no
            command because the one-shot motion stops by itself. */
-        if (footOffGround) queueMotorCommand(MOTOR_PATH_ONESHOT_RIGHT);
+        if (footOffGround) queueMotorCommand(MOTOR_PATH_ONESHOT);
       }
       if (now - lastDebug >= 100)
       {
@@ -846,7 +882,8 @@ void setup(void)
     while (true) delay(1000);
   }
   if (imuCalibrated)
-    webLog("READY,type s = still cal (5s), w = walk cal (8s), f = FSM mode, a = advanced capture, d = show params.");
+    webLog("READY,leg=%s,type s = still cal (5s), w = walk cal (8s), f = FSM mode, a = advanced capture, d = show params.",
+           LEG_NAME);
   else
     webLog("READY,IMU calibration required. type i to start.");
   xTaskCreatePinnedToCore(imuTask, "imu_rt", 4096, nullptr, 5, nullptr, 0);

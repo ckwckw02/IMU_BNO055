@@ -19,8 +19,8 @@ pre{white-space:pre-wrap;margin:0;font-size:14px}
 </style>
 </head>
 <body>
-<h1>RIMU</h1>
-<div class="card">WiFi: <strong id="wifi">checking...</strong><br><span id="ip"></span><br>Mode: <strong id="mode">-</strong></div>
+<h1 id="title">RIMU</h1>
+<div class="card">Leg: <strong id="leg">-</strong><br>WiFi: <strong id="wifi">checking...</strong><br><span id="ip"></span><br>Mode: <strong id="mode">-</strong></div>
 <div class="card">
 <button id="b_i" onclick="sendCommand('i')">IMU cal</button>
 <button id="b_s" onclick="sendCommand('s')">Still cal</button>
@@ -46,6 +46,8 @@ async function refresh(){
     wifi.textContent=d.wifi+(d.ip?' ('+d.ip+')':'');
     wifi.className=d.connected?'ok':'bad';
     document.getElementById('ip').textContent=d.hostname;
+    if(d.leg)document.getElementById('leg').textContent=d.leg;
+    if(d.device){document.getElementById('title').textContent=d.device;document.title=d.device;}
     document.getElementById('mode').textContent=d.mode;
     highlightMode(d.mode);
     document.getElementById('live').textContent=
